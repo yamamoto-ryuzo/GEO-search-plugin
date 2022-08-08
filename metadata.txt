@@ -1,0 +1,11 @@
+[general]
+name=(GEO)soja_search
+qgisMinimumVersion=2.99
+qgisMaximumVersion=3.99
+description=レイヤの地物検索
+about=住所と面積の＆検索
+version=1.0
+
+icon=icon/qgis-icon.png
+
+author=geosol
