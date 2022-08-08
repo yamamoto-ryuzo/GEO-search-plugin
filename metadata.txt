@@ -1,47 +1,11 @@
-# This file contains metadata for your plugin.
-
-# This file should be included when you package your plugin.# Mandatory items:
-
 [general]
-name=GEO_search
+name=(GEO)soja_search
 qgisMinimumVersion=2.99
 qgisMaximumVersion=3.99
 description=レイヤの地物検索
-about=検索
+about=住所と面積の＆検索
 version=1.0
-author=geosol & yamamoto
-email=ryu@yamakun.net
 
-
-about=This plugin makes it easy to fill text items in print templates and place/rotate plot.
-
-tracker=https://github.com/yamamoto-ryuzo/GEO-search-plugin
-repository=https://github.com/yamamoto-ryuzo/GEO-search-plugin
-# End of mandatory metadata
-
-# Recommended items:
-
-hasProcessingProvider=no
-
-# Tags are comma separated with spaces allowed
-tags=python, qgis, print, templates
-
-homepage=https://github.com/yamamoto-ryuzo/GEO-search-plugin
-category=Plugins
 icon=icon/qgis-icon.png
-# experimental flag
-experimental=False
 
-# deprecated flag (applies to the whole plugin, not just a single version)
-deprecated=False
-
-# Since QGIS 3.8, a comma separated list of plugins to be installed
-# (or upgraded) can be specified.
-# Check the documentation for more information.
-# plugin_dependencies=
-
-Category of the plugin: Raster, Vector, Database or Web
-# category= Vector
-
-# If the plugin can run on QGIS Server.
-server=False
+author=geosol
