@@ -25,11 +25,11 @@
       "AzaTable": {
         // 字コード表を表示するための情報
         "DataType": "postgres",
-        "Host": "localhost",
+        "Host": "あなたの情報",
         "Port": "5433",
-        "Database": "sojya",
-        "User": "postgres",
-        "Password": "postgres",
+        "Database": "あなたの情報",
+        "User": "あなたの情報",
+        "Password": "あなたの情報",
         "Schema": "public",
         "Table": "コード表_字",
         "Columns": [
