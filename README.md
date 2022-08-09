@@ -1,5 +1,10 @@
-# 地図検  
-# おや～～こんどはリリースできないエラー？
+# 地図検索  
+　地番検索  
+![image](https://user-images.githubusercontent.com/86514652/183770100-a385fad3-bc25-47f8-919c-659554c1f7e3.png)  
+　地番の所有者検索  
+![image](https://user-images.githubusercontent.com/86514652/183770143-61080ecd-7f55-4647-965a-206bc79191d1.png)  
+　汎用的な検索  
+![image](https://user-images.githubusercontent.com/86514652/183770212-813b8b44-e19f-4c50-a5ec-5df970539e17.png)  
 ## 設定項目
 
 ```json
