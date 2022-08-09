@@ -8,4 +8,4 @@ version=1.0
 
 icon=icon/qgis-icon.png
 
-author=geosol
+author=geosol & yamamotoryuzo
