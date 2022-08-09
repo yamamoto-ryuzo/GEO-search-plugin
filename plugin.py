@@ -56,11 +56,11 @@ class plugin(object):
         ProjectInstance = QgsProject.instance()
         #文字列をJSONとして読込
         #変数の有無を確認
-        GEO_search_plugin_variable = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')
+        GEO_search_plugin_variable = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search')
         if GEO_search_plugin_variable is not None :
             #メッセージ表示
             #QMessageBox.information(None, "create_search_dialog", GEO_search_plugin_variable , QMessageBox.Yes) 
-            settings = json.loads(QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')) 
+            settings = json.loads(QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search')) 
              
             
         #メッセージ表示
