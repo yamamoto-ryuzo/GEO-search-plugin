@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from ast import IsNot
+from asyncio.windows_events import NULL
 from contextlib import nullcontext
 import json
 import os
@@ -6,6 +8,7 @@ import os
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 from qgis.core import QgsVectorLayer, Qgis, QgsProject, QgsWkbTypes, QgsMapLayer, QgsFields, QgsExpressionContextUtils
+from PyQt5.QtWidgets import QMessageBox
 
 from .searchfeature import (
     SearchTextFeature,
@@ -24,6 +27,9 @@ class plugin(object):
         self.current_feature = None
 
     def initGui(self):
+        #起動時に動作
+        #メッセージ表示
+        QMessageBox.information(None, "iniGui", "Gui構築", QMessageBox.Yes)
         icon_path = os.path.join(os.path.dirname(__file__), u"icon/qgis-icon.png")
         self.action = QAction(QIcon(icon_path), "地図検索", self.iface.mainWindow())
         self.action.triggered.connect(self.run)
@@ -37,21 +43,29 @@ class plugin(object):
 
     def create_search_dialog(self):
         self.current_feature = None
-        
         #ファイルからjsonを読み込む
-        #setting_path = os.path.join(os.path.dirname(__file__), "setting.json")
-        #with open(setting_path) as f:
+        setting_path = os.path.join(os.path.dirname(__file__), "setting.json")
+        with open(setting_path) as f:
         #ファイルオブジェクトをJSONとして読込
-        #    settings = json.load(f)
-            
+            settings = json.load(f)
+
         # jsonファイルの追加設定
         # プロジェクト変数から追加読み込み
         # 変数名 GEO-search-plugin
         # 変数
         ProjectInstance = QgsProject.instance()
         #文字列をJSONとして読込
-        settings = json.loads(QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')) 
-     
+        #変数の有無を確認
+        GEO_search_plugin_variable = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')
+        if GEO_search_plugin_variable is not None :
+            #メッセージ表示
+            QMessageBox.information(None, "create_search_dialog", GEO_search_plugin_variable , QMessageBox.Yes) 
+            settings = json.loads(QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')) 
+             
+            
+        #メッセージ表示
+        QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
+            
         self.dialog = SearchDialog(settings, parent=self.iface.mainWindow())
         widgets = self.dialog.get_widgets()
         self.search_features = []
