@@ -1,0 +1,4 @@
+*.txt    text eol=crlf
+*.py    text eol=crlf
+*.json    text eol=crlf
+*.sql    text eol=crlf
