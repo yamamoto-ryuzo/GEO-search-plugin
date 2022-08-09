@@ -29,7 +29,7 @@ class plugin(object):
     def initGui(self):
         #起動時に動作
         #メッセージ表示
-        QMessageBox.information(None, "iniGui", "Gui構築", QMessageBox.Yes)
+        #QMessageBox.information(None, "iniGui", "Gui構築", QMessageBox.Yes)
         icon_path = os.path.join(os.path.dirname(__file__), u"icon/qgis-icon.png")
         self.action = QAction(QIcon(icon_path), "地図検索", self.iface.mainWindow())
         self.action.triggered.connect(self.run)
@@ -59,12 +59,12 @@ class plugin(object):
         GEO_search_plugin_variable = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')
         if GEO_search_plugin_variable is not None :
             #メッセージ表示
-            QMessageBox.information(None, "create_search_dialog", GEO_search_plugin_variable , QMessageBox.Yes) 
+            #QMessageBox.information(None, "create_search_dialog", GEO_search_plugin_variable , QMessageBox.Yes) 
             settings = json.loads(QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')) 
              
             
         #メッセージ表示
-        QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
+        #QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
             
         self.dialog = SearchDialog(settings, parent=self.iface.mainWindow())
         widgets = self.dialog.get_widgets()
