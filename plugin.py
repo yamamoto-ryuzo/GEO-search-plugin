@@ -42,13 +42,17 @@ class plugin(object):
         self.iface.removeToolBarIcon(self.action)
 
     def create_search_dialog(self):
+        
+        input_json = ' {"SearchTabs": [ '
         self.current_feature = None
         #ファイルからjsonを読み込む
         setting_path = os.path.join(os.path.dirname(__file__), "setting.json")
         with open(setting_path) as f:
-        #ファイルオブジェクトをJSONとして読込
-            settings = json.load(f)
-
+        #テキストとしてJSONファイルを読込
+            input_json += f.read()
+            #メッセージ表示
+            QMessageBox.information(None, "create_search_dialog_variable", input_json , QMessageBox.Yes) 
+            
         # jsonファイルの追加設定
         # プロジェクト変数から追加読み込み
         # 変数名 GEO-search-plugin
@@ -59,10 +63,15 @@ class plugin(object):
         GEO_search_plugin_variable = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')
         if GEO_search_plugin_variable is not None :
             #メッセージ表示
-            #QMessageBox.information(None, "create_search_dialog", GEO_search_plugin_variable , QMessageBox.Yes) 
-            settings = json.loads(QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')) 
-             
+            QMessageBox.information(None, "create_search_dialog_variable", GEO_search_plugin_variable , QMessageBox.Yes) 
+            sinput_json += "," + GEO_search_plugin_variable
+         
+        input_json +=  '],"PageLimit": 10000}'
+                
+        settings = json.loads(input_json)
             
+         
+
         #メッセージ表示
         #QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
             
