@@ -14,7 +14,9 @@
 {
   "SearchTabs": [
  
-ここ以下をプロジェクトファイルもしくはsetting.jsonに設定してください。
+ここ以下をプロジェクト変数「GEO-search-plugin」もしくはプラグイン内の設定ファイル「setting.json」に設定してください。
+　・プロジェクト変数「GEO-search-plugin」　　　プロジェクトごとに変更したい検索  
+　・プラグイン内の設定ファイル「setting.json」　プラグイン全体を通して利用する検索  
     {
       "Title": "サンプル",
       "Layer": {
