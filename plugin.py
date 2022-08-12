@@ -30,13 +30,12 @@ class plugin(object):
         #起動時に動作
         #メッセージ表示
         #QMessageBox.information(None, "iniGui", "Gui構築", QMessageBox.Yes)
+        flag = 0
         icon_path = os.path.join(os.path.dirname(__file__), u"icon/qgis-icon.png")
         self.action = QAction(QIcon(icon_path), "地図検索", self.iface.mainWindow())
         self.action.triggered.connect(self.run)
         self.iface.addToolBarIcon(self.action)
         self.iface.projectRead.connect(self.create_search_dialog)
-
-        self.create_search_dialog()
 
     def unload(self):
         self.iface.removeToolBarIcon(self.action)
@@ -44,6 +43,7 @@ class plugin(object):
     def create_search_dialog(self):
         
         self.current_feature = None
+        flag = 0
         
         #設定開始
         input_json = ' {"SearchTabs": [ '
@@ -57,59 +57,64 @@ class plugin(object):
             with open(setting_path) as f:
                 #テキストとして読込
                 input_json_file = f.read()
-                #メッセージ表示
-                QMessageBox.information(None, "設定ファイルの読み込み", input_json_file , QMessageBox.Yes) 
             
         # プロジェクト変数から追加読込
         # 変数名 GEO-search-plugin
         ProjectInstance = QgsProject.instance()
         #テキストとして読込
-        input_json_variable = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')
-        #メッセージ表示
-        if  input_json_variable is not None:
-            QMessageBox.information(None, "設定変数の読み込み", input_json_variable , QMessageBox.Yes)    
+        if QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin') is not None:
+            input_json_variable = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')
 
         #ファイルと変数を結合
-        if input_json_file is not None:
+        if input_json_file  != "":
             input_json +=  input_json_file
-            if  input_json_variable is not None:
+            flag = 1
+            #メッセージ表示
+            QMessageBox.information(None, "設定ファイルの読込", input_json_file , QMessageBox.Yes) 
+            if input_json_variable  != "":
                 input_json +=  ","  
         if  input_json_variable is not None:
             input_json +=  input_json_variable
+            flag = 1
+            #メッセージ表示
+            QMessageBox.information(None, "設定変数の読込", input_json_variable , QMessageBox.Yes)  
 
         #設定終了
-        input_json += '],"PageLimit": 10000}'           
-        
-        #テキストをJSONとして読込
-        settings = json.loads(input_json)
-
+        input_json += '],"PageLimit": 10000}'   
         #メッセージ表示
-        #QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
+        QMessageBox.information(None, "JSON設定", input_json , QMessageBox.Yes)     
+        
+        if flag == 1:
+            #テキストをJSONとして読込
+            settings = json.loads(input_json)
+
+            #メッセージ表示
+            #QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
             
-        self.dialog = SearchDialog(settings, parent=self.iface.mainWindow())
-        widgets = self.dialog.get_widgets()
-        self.search_features = []
-        for setting, widget in zip(settings["SearchTabs"], widgets):
-            if setting["Title"] == "地番検索":
-                feature = SearchTibanFeature(self.iface, setting, widget)
-            elif setting["Title"] == "所有者検索":
-                feature = SearchOwnerFeature(
-                    self.iface,
-                    setting,
-                    widget,
-                    andor=" Or ",
-                    page_limit=settings.get("PageLimit", 1000),
-                )
-            else:
-                feature = SearchTextFeature(
-                    self.iface,
-                    setting,
-                    widget,
-                    page_limit=settings.get("PageLimit", 1000),
-                )
-            self.search_features.append(feature)
-        self.change_sesarch_feature(0)
-        self.dialog.tabWidget.currentChanged.connect(self.change_sesarch_feature)
+            self.dialog = SearchDialog(settings, parent=self.iface.mainWindow())
+            widgets = self.dialog.get_widgets()
+            self.search_features = []
+            for setting, widget in zip(settings["SearchTabs"], widgets):
+                if setting["Title"] == "地番検索":
+                    feature = SearchTibanFeature(self.iface, setting, widget)
+                elif setting["Title"] == "所有者検索":
+                    feature = SearchOwnerFeature(
+                        self.iface,
+                        setting,
+                        widget,
+                        andor=" Or ",
+                        page_limit=settings.get("PageLimit", 1000),
+                    )
+                else:
+                    feature = SearchTextFeature(
+                        self.iface,
+                        setting,
+                        widget,
+                        page_limit=settings.get("PageLimit", 1000),
+                    )
+                self.search_features.append(feature)
+                self.change_sesarch_feature(0)
+                self.dialog.tabWidget.currentChanged.connect(self.change_sesarch_feature)
 
     def run(self, state=None, layer=None, view_fields=None):
         """ 検索ダイアログを表示する """
