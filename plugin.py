@@ -43,34 +43,45 @@ class plugin(object):
 
     def create_search_dialog(self):
         
-        input_json = ' {"SearchTabs": [ '
         self.current_feature = None
-        #ファイルからjsonを読み込む
-        setting_path = os.path.join(os.path.dirname(__file__), "setting.json")
-        with open(setting_path) as f:
-        #テキストとしてJSONファイルを読込
-            input_json += f.read()
-            #メッセージ表示
-            QMessageBox.information(None, "create_search_dialog_variable", input_json , QMessageBox.Yes) 
+        
+        #設定開始
+        input_json = ' {"SearchTabs": [ '
+        input_json_file = ""
+        input_json_variable = ""
+
+        #setting.jsonの読込
+        if os.path.exists(os.path.join(os.path.dirname(__file__), "setting.json")):
+            setting_path = os.path.join(os.path.dirname(__file__), "setting.json")
+            #ファイルから読込
+            with open(setting_path) as f:
+                #テキストとして読込
+                input_json_file = f.read()
+                #メッセージ表示
+                QMessageBox.information(None, "設定ファイルの読み込み", input_json_file , QMessageBox.Yes) 
             
-        # jsonファイルの追加設定
-        # プロジェクト変数から追加読み込み
+        # プロジェクト変数から追加読込
         # 変数名 GEO-search-plugin
-        # 変数
         ProjectInstance = QgsProject.instance()
-        #文字列をJSONとして読込
-        #変数の有無を確認
-        GEO_search_plugin_variable = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')
-        if GEO_search_plugin_variable is not None :
-            #メッセージ表示
-            QMessageBox.information(None, "create_search_dialog_variable", GEO_search_plugin_variable , QMessageBox.Yes) 
-            sinput_json += "," + GEO_search_plugin_variable
-         
-        input_json +=  '],"PageLimit": 10000}'
-                
+        #テキストとして読込
+        input_json_variable = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('GEO-search-plugin')
+        #メッセージ表示
+        if  input_json_variable is not None:
+            QMessageBox.information(None, "設定変数の読み込み", input_json_variable , QMessageBox.Yes)    
+
+        #ファイルと変数を結合
+        if input_json_file is not None:
+            input_json +=  input_json_file
+            if  input_json_variable is not None:
+                input_json +=  ","  
+        if  input_json_variable is not None:
+            input_json +=  input_json_variable
+
+        #設定終了
+        input_json += '],"PageLimit": 10000}'           
+        
+        #テキストをJSONとして読込
         settings = json.loads(input_json)
-            
-         
 
         #メッセージ表示
         #QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
