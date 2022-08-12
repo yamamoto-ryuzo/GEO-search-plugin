@@ -1,4 +1,5 @@
 # 地図検索  
+最終的には https://github.com/NationalSecurityAgency/qgis-searchlayers-plugin と統合したい  
 　地番検索  
 ![image](https://user-images.githubusercontent.com/86514652/183770100-a385fad3-bc25-47f8-919c-659554c1f7e3.png)  
 　地番の所有者検索  
