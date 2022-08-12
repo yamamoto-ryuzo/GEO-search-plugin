@@ -8,8 +8,12 @@
 ## 設定項目
 
 ```json
+詳しいサンプルは，プラグインに添付されている「setting.json.sample」を参照ください
+そのうち，環境設定ようの画面も作成予定ですが，日本のベースレジストリ対応が先かな？
 {
   "SearchTabs": [
+ 
+ここ以下をプロジェクトファイルもしくはsetting.jsonに設定してください。
     {
       "Title": "サンプル",
       "Layer": {
@@ -62,7 +66,23 @@
       "ViewFields": ["結果に表示する属性"],
       "Message": "？ボタンで表示されるメッセージ",
       "SampleTableLimit": 100 // 一時テーブルに表示で表示される件数
+    },
+    {
+      "Title": "地籍検索(地番)",
+      "Layer": {
+        "LayerType": "Name",
+        "Name": "地籍",
+        "Encoding": "cp932"
+      },
+      "SearchField": {
+        "FieldType": "Text",
+        "ViewName": "住所",
+        "Field": "住所"
+      },
+      "ViewFields": []
     }
+ここまでを設定してください。
+   
   ]
 }
 ```
