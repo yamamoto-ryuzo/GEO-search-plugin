@@ -135,7 +135,7 @@ class plugin(object):
     def run(self, state=None, layer=None, view_fields=None):
         """ 検索ダイアログを表示する """
         #メッセージ表示
-        QMessageBox.information(None, "run", "検索ダイアログ表示", QMessageBox.Yes)
+        #QMessageBox.information(None, "run", "検索ダイアログ表示", QMessageBox.Yes)
         self.dialog.show()
 
     def change_sesarch_feature(self, index):
