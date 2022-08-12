@@ -27,20 +27,36 @@ class plugin(object):
         self.current_feature = None
 
     def initGui(self):
-        #起動時に動作
+
+        #プラグイン開始時に動作
         #メッセージ表示
         #QMessageBox.information(None, "iniGui", "Gui構築", QMessageBox.Yes)
-        flag = 0
+        
+        #ダイヤログ構築
+        self.create_search_dialog()
+
+        #アイコン設定
         icon_path = os.path.join(os.path.dirname(__file__), u"icon/qgis-icon.png")
         self.action = QAction(QIcon(icon_path), "地図検索", self.iface.mainWindow())
-        self.action.triggered.connect(self.run)
+        self.action.setObjectName('地図検索')
         self.iface.addToolBarIcon(self.action)
+        self.iface.addPluginToMenu("地図検索", self.action)
+       
+        #トリガー構築
+        self.action.triggered.connect(self.run)
         self.iface.projectRead.connect(self.create_search_dialog)
 
+        
+
     def unload(self):
+        #プラグイン終了時に動作
         self.iface.removeToolBarIcon(self.action)
+        self.iface.removePluginMenu('地図検索', self.action)
 
     def create_search_dialog(self):
+        
+        #メッセージ表示
+        #QMessageBox.information(None, "create_search_dialog", "ダイヤログ構築", QMessageBox.Yes)
         
         self.current_feature = None
         flag = 0
@@ -70,19 +86,19 @@ class plugin(object):
             input_json +=  input_json_file
             flag = 1
             #メッセージ表示
-            QMessageBox.information(None, "設定ファイルの読込", input_json_file , QMessageBox.Yes) 
+            #QMessageBox.information(None, "設定ファイルの読込", input_json_file , QMessageBox.Yes) 
             if input_json_variable  != "":
                 input_json +=  ","  
         if  input_json_variable is not None:
             input_json +=  input_json_variable
             flag = 1
             #メッセージ表示
-            QMessageBox.information(None, "設定変数の読込", input_json_variable , QMessageBox.Yes)  
+            #QMessageBox.information(None, "設定変数の読込", input_json_variable , QMessageBox.Yes)  
 
         #設定終了
         input_json += '],"PageLimit": 10000}'   
         #メッセージ表示
-        QMessageBox.information(None, "JSON設定", input_json , QMessageBox.Yes)     
+        #QMessageBox.information(None, "JSON設定", input_json , QMessageBox.Yes)     
         
         if flag == 1:
             #テキストをJSONとして読込
@@ -118,6 +134,8 @@ class plugin(object):
 
     def run(self, state=None, layer=None, view_fields=None):
         """ 検索ダイアログを表示する """
+        #メッセージ表示
+        QMessageBox.information(None, "run", "検索ダイアログ表示", QMessageBox.Yes)
         self.dialog.show()
 
     def change_sesarch_feature(self, index):
