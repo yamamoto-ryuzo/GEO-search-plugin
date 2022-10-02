@@ -2,13 +2,14 @@
 import os
 import math
 
+from qgis.PyQt.QtCore import QDate
 from qgis.PyQt.QtWidgets import QDialog, QTableWidgetItem
 from qgis.PyQt import uic
 
 
 UI_FILE = "result.ui"
 
-
+#検索結果
 class ResultDialog(QDialog):
     def __init__(self, parent=None, page_limit=500):
         QDialog.__init__(self, parent)
@@ -69,8 +70,15 @@ class ResultDialog(QDialog):
 
     def create_item(self, field, feature):
         # 検索結果をテーブルにセットしていく
+        # フィールド名を取得
         name = field.name()
         item = QTableWidgetItem()
-        item.setText(unicode(feature.attribute(name)))
+        # アイテムに指定フィールドの属性をセット
+        # 日付の場合の場合はも書式を指定して文字列に変換
+        if isinstance(feature.attribute(name),QDate):
+            item.setText(QDate.toString(feature.attribute(name),'yyyy/M/d')) 
+        else:
+        # その他はそのまま
+            item.setText(unicode(feature.attribute(name)))     
         item.setData(self.data_role, feature.id())
         return item

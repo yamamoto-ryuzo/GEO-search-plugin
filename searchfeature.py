@@ -15,10 +15,8 @@ from qgis.core import (
 )
 from . import jaconv
 
-
 from .resultdialog import ResultDialog
 from .utils import name2layer, unique_values, get_feature_by_id
-
 
 class SearchFeature(object):
     def __init__(self, iface, setting, widget, andor=" And ", page_limit=1000):
@@ -229,7 +227,7 @@ class SearchFeature(object):
             result = []
         self.result_dialog.set_features(self.view_fields, result)
 
-
+#"通常の検索"
 class SearchTextFeature(SearchFeature):
     def load(self):
         if self.suggest_flg:
@@ -273,7 +271,7 @@ class SearchTextFeature(SearchFeature):
             request.setLimit(limit)
         return list(layer.getFeatures(request))
 
-
+#"地番検索"
 class SearchTibanFeature(SearchTextFeature):
     FUZZY_NUM = 2
 
@@ -427,6 +425,7 @@ class SearchTibanFeature(SearchTextFeature):
         return list(layer.getFeatures(request))
 
 
+#"所有者検索"
 class SearchOwnerFeature(SearchTextFeature):
     def load(self):
         if self.suggest_flg:
