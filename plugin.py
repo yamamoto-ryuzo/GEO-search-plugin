@@ -20,7 +20,6 @@ from .searchdialog import SearchDialog
 # TODO: Fieldの確認
 # TODO: 表示テーブルの順番変更
 
-
 class plugin(object):
     def __init__(self, iface):
         self.iface = iface
@@ -45,9 +44,7 @@ class plugin(object):
         #トリガー構築
         self.action.triggered.connect(self.run)
         self.iface.projectRead.connect(self.create_search_dialog)
-
-        
-
+ 
     def unload(self):
         #プラグイン終了時に動作
         self.iface.removeToolBarIcon(self.action)
@@ -112,8 +109,10 @@ class plugin(object):
             self.search_features = []
             for setting, widget in zip(settings["SearchTabs"], widgets):
                 if setting["Title"] == "地番検索":
+                    #地番検索
                     feature = SearchTibanFeature(self.iface, setting, widget)
                 elif setting["Title"] == "所有者検索":
+                    #所有者検索
                     feature = SearchOwnerFeature(
                         self.iface,
                         setting,
@@ -122,6 +121,7 @@ class plugin(object):
                         page_limit=settings.get("PageLimit", 1000),
                     )
                 else:
+                    #通常検索
                     feature = SearchTextFeature(
                         self.iface,
                         setting,

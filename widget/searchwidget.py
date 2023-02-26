@@ -38,7 +38,7 @@ class SearchWidget(QWidget):
             layout.addWidget(widget)
         self.setLayout(layout)
 
-
+#通常検索
 class SearchTextWidget(SearchWidget):
     # TODO: テキスト編集時に検索動作
     # 住所と面積検索のUI
@@ -61,7 +61,7 @@ class SearchTextWidget(SearchWidget):
         line_edit = QLineEdit()
         return label, line_edit
 
-
+#地番検索
 class SearchTibanWidget(SearchTextWidget):
     def init_layout(self, widgets):
         layout = QVBoxLayout()
@@ -109,7 +109,7 @@ class SearchTibanWidget(SearchTextWidget):
         widgets = [search_layout]
         return widgets
 
-
+#所有者検索
 class SearchOwnerWidget(SearchTextWidget):
     def init_layout(self, widgets):
         layout = QVBoxLayout()

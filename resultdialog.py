@@ -9,7 +9,7 @@ from qgis.PyQt import uic
 
 UI_FILE = "result.ui"
 
-#検索結果
+#検索結果表示ダイアログ
 class ResultDialog(QDialog):
     def __init__(self, parent=None, page_limit=500):
         QDialog.__init__(self, parent)
