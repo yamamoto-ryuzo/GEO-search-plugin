@@ -3,7 +3,7 @@ import os
 
 import psycopg2
 from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtWidgets import QCompleter, QMessageBox, QTableWidgetItem
+from qgis.PyQt.QtWidgets import QCompleter, QDialog, QMessageBox, QTableWidgetItem
 from qgis.core import (
     QgsApplication,
     QgsDataSourceUri,
@@ -17,6 +17,7 @@ from . import jaconv
 
 from .resultdialog import ResultDialog
 from .utils import name2layer, unique_values, get_feature_by_id
+
 
 class SearchFeature(object):
     def __init__(self, iface, setting, widget, andor=" And ", page_limit=1000):
@@ -177,7 +178,7 @@ class SearchFeature(object):
         self.iface.openFeatureForm(self.layer, feature)
 
     def zoom_item(self, item):
-        """ クリックした地物アイテムの座標にズームする """
+        """クリックした地物アイテムの座標にズームする"""
         if not item:
             return
         value = item.data(self.data_role)
@@ -188,7 +189,7 @@ class SearchFeature(object):
         self.zoom_features([item.data(self.data_role) for item in items])
 
     def zoom_features(self, feature_ids=None):
-        """ 検索結果にズーム"""
+        """検索結果にズーム"""
         if feature_ids is None and not self.result_features:
             return
         elif feature_ids is None:
@@ -197,7 +198,7 @@ class SearchFeature(object):
         self.iface.mapCanvas().zoomToSelected(self.layer)
 
     def show_features(self):
-        """ 検索結果を表示する """
+        """検索結果を表示する"""
         if not self.layer:
             return
         features = self.search_feature()
@@ -215,7 +216,7 @@ class SearchFeature(object):
         self.sample_table_task = task
 
     def search_task(self, task):
-        """ 検索最中に検索テーブルを更新する """
+        """検索最中に検索テーブルを更新する"""
         try:
             features = self.search_feature()
         except:
@@ -227,7 +228,8 @@ class SearchFeature(object):
             result = []
         self.result_dialog.set_features(self.view_fields, result)
 
-#"通常の検索"
+
+# "通常の検索"
 class SearchTextFeature(SearchFeature):
     def load(self):
         if self.suggest_flg:
@@ -271,21 +273,24 @@ class SearchTextFeature(SearchFeature):
             request.setLimit(limit)
         return list(layer.getFeatures(request))
 
-#"地番検索"
+
+# "地番検索"
 class SearchTibanFeature(SearchTextFeature):
     FUZZY_NUM = 2
 
     def load(self):
         if self.suggest_flg:
             self.set_suggest()
-        dialog = self.widget.parent().parent().parent()
+        dialog = self.widget.dialog
+        # 問題
         dialog.questionButton.setVisible(bool(self.message))
         dialog.questionButton.clicked.connect(self.show_message)
         self.init_code_table()
         self.widget.code_table.itemSelectionChanged.connect(self.set_aza_code)
 
     def unload(self):
-        dialog = self.widget.parent().parent().parent()
+        dialog = self.widget.dialog
+        # 問題
         dialog.questionButton.clicked.disconnect(self.show_message)
         self.widget.code_table.itemSelectionChanged.disconnect(self.set_aza_code)
 
@@ -425,17 +430,17 @@ class SearchTibanFeature(SearchTextFeature):
         return list(layer.getFeatures(request))
 
 
-#"所有者検索"
+# "所有者検索"
 class SearchOwnerFeature(SearchTextFeature):
     def load(self):
         if self.suggest_flg:
             self.set_suggest()
-        dialog = self.widget.parent().parent().parent()
+        dialog = self.widget.dialog
         dialog.questionButton.setVisible(bool(self.message))
         dialog.questionButton.clicked.connect(self.show_message)
 
     def unload(self):
-        dialog = self.widget.parent().parent().parent()
+        dialog = self.widget.dialog
         dialog.questionButton.clicked.disconnect(self.show_message)
 
     def search_feature(self, limit=None):
@@ -453,29 +458,49 @@ class SearchOwnerFeature(SearchTextFeature):
                 continue
 
             if field.get("KanaHankaku", False):
-#                value = jaconv.z2h(value, digit=False, ascii=False)
-                value = value.replace('ｬ', 'ﾔ').replace("ｭ", "ﾕ").replace("ｮ", "ﾖ").replace("ｯ", "ﾂ").replace("ｧ", "ｱ").replace("ｨ", "ｲ").replace("ｩ", "ｳ").replace("ｪ", "ｴ").replace("ｫ", "ｵ")
+                #                value = jaconv.z2h(value, digit=False, ascii=False)
+                value = (
+                    value.replace("ｬ", "ﾔ")
+                    .replace("ｭ", "ﾕ")
+                    .replace("ｮ", "ﾖ")
+                    .replace("ｯ", "ﾂ")
+                    .replace("ｧ", "ｱ")
+                    .replace("ｨ", "ｲ")
+                    .replace("ｩ", "ｳ")
+                    .replace("ｪ", "ｴ")
+                    .replace("ｫ", "ｵ")
+                )
             else:
-                value = value.replace('ャ', 'ヤ').replace("ュ", "ユ").replace("ョ", "ヨ").replace("ッ", "ツ").replace("ァ", "ア").replace("ィ", "イ").replace("ゥ", "ウ").replace("ェ", "エ").replace("ォ", "オ")
+                value = (
+                    value.replace("ャ", "ヤ")
+                    .replace("ュ", "ユ")
+                    .replace("ョ", "ヨ")
+                    .replace("ッ", "ツ")
+                    .replace("ァ", "ア")
+                    .replace("ィ", "イ")
+                    .replace("ゥ", "ウ")
+                    .replace("ェ", "エ")
+                    .replace("ォ", "オ")
+                )
 
             value = (
                 f"%{value}%" if self.widget.forward_button.isChecked() else f"{value}%"
             )
 
             if field.get("KanaHankaku", False):
-              expres_list.append(
-                  "replace(\"{field}\", array('\\\\s', '　','ｧ','ｨ','ｩ','ｪ','ｫ','ｬ','ｭ','ｮ','ｯ','ァ','ィ','ゥ','ェ','ォ','ャ','ュ','ョ','ッ','ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト','ナ','ニ','ヌ','ネ','ノ','ハ','ヒ','フ','ヘ','ホ','マ','ミ','ム','メ','モ','ヤ','ユ','ヨ','ラ','リ','ル','レ','ロ', 'ワ','ヰ','ヱ','ヲ','ン','ガ','ギ','グ','ゲ','ゴ','ザ','ジ','ズ','ゼ','ゾ','ダ','ヂ','ヅ','デ','ド','バ','ビ','ブ','ベ','ボ','パ','ピ','プ','ペ','ポ','ァ','ィ','ゥ','ェ','ォ','ャ','ュ','ョ','ッ'), array('', '','ｱ','ｲ','ｳ','ｴ','ｵ','ﾔ','ﾕ','ﾖ','ﾂ','ア','イ','ウ','エ','オ','ヤ','ユ','ヨ','ツ','ｱ','ｲ','ｳ','ｴ','ｵ','ｶ','ｷ','ｸ','ｹ','ｺ','ｻ','ｼ','ｽ','ｾ','ｿ','ﾀ','ﾁ','ﾂ','ﾃ','ﾄ', 'ﾅ','ﾆ','ﾇ','ﾈ','ﾉ','ﾊ','ﾋ','ﾌ','ﾍ','ﾎ','ﾏ','ﾐ','ﾑ','ﾒ','ﾓ','ﾔ','ﾕ','ﾖ','ﾗ','ﾘ','ﾙ','ﾚ','ﾛ','ﾜ','ｲ','ｴ','ｦ','ﾝ','ｶﾞ','ｷﾞ','ｸﾞ','ｹﾞ','ｺﾞ','ｻﾞ','ｼﾞ','ｽﾞ','ｾﾞ','ｿﾞ','ﾀﾞ','ﾁﾞ','ﾂﾞ','ﾃﾞ','ﾄﾞ','ﾊﾞ','ﾋﾞ','ﾌﾞ','ﾍﾞ','ﾎﾞ','ﾊﾟ','ﾋﾟ','ﾌﾟ','ﾍﾟ','ﾎﾟ','ｱ','ｲ','ｳ','ｴ','ｵ','ﾔ','ﾕ','ﾖ','ﾂ')) LIKE '{value}'".format(
-                      field=field_name,
-                      value=value,
-                  )
-              )
+                expres_list.append(
+                    "replace(\"{field}\", array('\\\\s', '　','ｧ','ｨ','ｩ','ｪ','ｫ','ｬ','ｭ','ｮ','ｯ','ァ','ィ','ゥ','ェ','ォ','ャ','ュ','ョ','ッ','ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト','ナ','ニ','ヌ','ネ','ノ','ハ','ヒ','フ','ヘ','ホ','マ','ミ','ム','メ','モ','ヤ','ユ','ヨ','ラ','リ','ル','レ','ロ', 'ワ','ヰ','ヱ','ヲ','ン','ガ','ギ','グ','ゲ','ゴ','ザ','ジ','ズ','ゼ','ゾ','ダ','ヂ','ヅ','デ','ド','バ','ビ','ブ','ベ','ボ','パ','ピ','プ','ペ','ポ','ァ','ィ','ゥ','ェ','ォ','ャ','ュ','ョ','ッ'), array('', '','ｱ','ｲ','ｳ','ｴ','ｵ','ﾔ','ﾕ','ﾖ','ﾂ','ア','イ','ウ','エ','オ','ヤ','ユ','ヨ','ツ','ｱ','ｲ','ｳ','ｴ','ｵ','ｶ','ｷ','ｸ','ｹ','ｺ','ｻ','ｼ','ｽ','ｾ','ｿ','ﾀ','ﾁ','ﾂ','ﾃ','ﾄ', 'ﾅ','ﾆ','ﾇ','ﾈ','ﾉ','ﾊ','ﾋ','ﾌ','ﾍ','ﾎ','ﾏ','ﾐ','ﾑ','ﾒ','ﾓ','ﾔ','ﾕ','ﾖ','ﾗ','ﾘ','ﾙ','ﾚ','ﾛ','ﾜ','ｲ','ｴ','ｦ','ﾝ','ｶﾞ','ｷﾞ','ｸﾞ','ｹﾞ','ｺﾞ','ｻﾞ','ｼﾞ','ｽﾞ','ｾﾞ','ｿﾞ','ﾀﾞ','ﾁﾞ','ﾂﾞ','ﾃﾞ','ﾄﾞ','ﾊﾞ','ﾋﾞ','ﾌﾞ','ﾍﾞ','ﾎﾞ','ﾊﾟ','ﾋﾟ','ﾌﾟ','ﾍﾟ','ﾎﾟ','ｱ','ｲ','ｳ','ｴ','ｵ','ﾔ','ﾕ','ﾖ','ﾂ')) LIKE '{value}'".format(
+                        field=field_name,
+                        value=value,
+                    )
+                )
             else:
-              expres_list.append(
-                  "replace(\"{field}\", array('\\\\s', '　','ｧ','ｨ','ｩ','ｪ','ｫ','ｬ','ｭ','ｮ','ｯ','ァ','ィ','ゥ','ェ','ォ','ャ','ュ','ョ','ッ','ｱ','ｲ','ｳ','ｴ','ｵ','ｶ','ｷ','ｸ','ｹ','ｺ','ｻ','ｼ','ｽ','ｾ','ｿ','ﾀ','ﾁ','ﾂ','ﾃ','ﾄ', 'ﾅ','ﾆ','ﾇ','ﾈ','ﾉ','ﾊ','ﾋ','ﾌ','ﾍ','ﾎ','ﾏ','ﾐ','ﾑ','ﾒ','ﾓ','ﾔ','ﾕ','ﾖ','ﾗ','ﾘ','ﾙ','ﾚ','ﾛ','ﾜ','ｲ','ｴ','ｦ','ﾝ','ｶﾞ','ｷﾞ','ｸﾞ','ｹﾞ','ｺﾞ','ｻﾞ','ｼﾞ','ｽﾞ','ｾﾞ','ｿﾞ','ﾀﾞ','ﾁﾞ','ﾂﾞ','ﾃﾞ','ﾄﾞ','ﾊﾞ','ﾋﾞ','ﾌﾞ','ﾍﾞ','ﾎﾞ','ﾊﾟ','ﾋﾟ','ﾌﾟ','ﾍﾟ','ﾎﾟ','ｧ','ｨ','ｩ','ｪ','ｫ','ｬ','ｭ','ｮ','ｯ'), array('', '','ｱ','ｲ','ｳ','ｴ','ｵ','ﾔ','ﾕ','ﾖ','ﾂ','ア','イ','ウ','エ','オ','ヤ','ユ','ヨ','ツ','ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト','ナ','ニ','ヌ','ネ','ノ','ハ','ヒ','フ','ヘ','ホ','マ','ミ','ム','メ','モ','ヤ','ユ','ヨ','ラ','リ','ル','レ','ロ', 'ワ','ヰ','ヱ','ヲ','ン','ガ','ギ','グ','ゲ','ゴ','ザ','ジ','ズ','ゼ','ゾ','ダ','ヂ','ヅ','デ','ド','バ','ビ','ブ','ベ','ボ','パ','ピ','プ','ペ','ポ','ア','イ','ウ','エ','オ','ヤ','ユ','ヨ','ツ')) LIKE '{value}'".format(
-                      field=field_name,
-                      value=value,
-                  )
-              )
+                expres_list.append(
+                    "replace(\"{field}\", array('\\\\s', '　','ｧ','ｨ','ｩ','ｪ','ｫ','ｬ','ｭ','ｮ','ｯ','ァ','ィ','ゥ','ェ','ォ','ャ','ュ','ョ','ッ','ｱ','ｲ','ｳ','ｴ','ｵ','ｶ','ｷ','ｸ','ｹ','ｺ','ｻ','ｼ','ｽ','ｾ','ｿ','ﾀ','ﾁ','ﾂ','ﾃ','ﾄ', 'ﾅ','ﾆ','ﾇ','ﾈ','ﾉ','ﾊ','ﾋ','ﾌ','ﾍ','ﾎ','ﾏ','ﾐ','ﾑ','ﾒ','ﾓ','ﾔ','ﾕ','ﾖ','ﾗ','ﾘ','ﾙ','ﾚ','ﾛ','ﾜ','ｲ','ｴ','ｦ','ﾝ','ｶﾞ','ｷﾞ','ｸﾞ','ｹﾞ','ｺﾞ','ｻﾞ','ｼﾞ','ｽﾞ','ｾﾞ','ｿﾞ','ﾀﾞ','ﾁﾞ','ﾂﾞ','ﾃﾞ','ﾄﾞ','ﾊﾞ','ﾋﾞ','ﾌﾞ','ﾍﾞ','ﾎﾞ','ﾊﾟ','ﾋﾟ','ﾌﾟ','ﾍﾟ','ﾎﾟ','ｧ','ｨ','ｩ','ｪ','ｫ','ｬ','ｭ','ｮ','ｯ'), array('', '','ｱ','ｲ','ｳ','ｴ','ｵ','ﾔ','ﾕ','ﾖ','ﾂ','ア','イ','ウ','エ','オ','ヤ','ユ','ヨ','ツ','ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト','ナ','ニ','ヌ','ネ','ノ','ハ','ヒ','フ','ヘ','ホ','マ','ミ','ム','メ','モ','ヤ','ユ','ヨ','ラ','リ','ル','レ','ロ', 'ワ','ヰ','ヱ','ヲ','ン','ガ','ギ','グ','ゲ','ゴ','ザ','ジ','ズ','ゼ','ゾ','ダ','ヂ','ヅ','デ','ド','バ','ビ','ブ','ベ','ボ','パ','ピ','プ','ペ','ポ','ア','イ','ウ','エ','オ','ヤ','ユ','ヨ','ツ')) LIKE '{value}'".format(
+                        field=field_name,
+                        value=value,
+                    )
+                )
         expression = QgsExpression(self.andor.join(expres_list))
         request = QgsFeatureRequest(expression)
         if limit:

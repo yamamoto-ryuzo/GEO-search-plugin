@@ -11,10 +11,10 @@ from .widget.searchwidget import (
     SearchTibanWidget,
     SearchOwnerWidget,
 )
+from .constants import OTHER_GROUP_NAME
 
 
 UI_FILE = "dialog.ui"
-OTHER_GROUP_NAME = "その他"
 
 
 class SearchDialog(QDialog):
@@ -59,8 +59,8 @@ class SearchDialog(QDialog):
             if group_name not in tab_groups:
                 group_widget = QTabWidget()
                 tab_groups[group_name] = group_widget
-        if len(tab_groups) <= 1:
-            return []
+        if len(tab_groups) <= 1 and OTHER_GROUP_NAME in tab_groups:
+            return {}
         for group_name, group_widget in tab_groups.items():
             self.tabWidget.addTab(group_widget, group_name)
         return tab_groups
