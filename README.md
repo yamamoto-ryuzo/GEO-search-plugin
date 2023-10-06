@@ -110,8 +110,8 @@
 #設定ファイル説明
 ## SearchTab
 
-| --- | --- | --- |
 | Property | Description | Type |
+| --- | --- | --- |
 | Title | タブに表示されるタイトル。タイトルが地番検索・所有者検索の場合特殊検索になる。 | str |
 | Group | タブをまとめるタブグループ、グループ名となり同名グループでまとまる。 | str |
 | Layer | 読み込むレイヤ情報 | dict |
@@ -128,16 +128,16 @@
 Title で `地番検索`として場合に表示される検索。
 
 地番検索用の設定
-| --- | --- | --- |
 | Property | Description | Type |
+| --- | --- | --- |
 | TibanField | 地番の属性名 | str |
 | AzaTable | 地番検索用: 字コード設定 | dict |
 
 **AzaTable**
 字コード表を表示するための情報
 
-| --- | --- | --- |
 | Property | Description | Type |
+| --- | --- | --- |
 | DataType | 接続するデータベース | Literal["postgres"] |
 | Host | データベースのアドレス | str |
 | Port | データベースのポート | str |
@@ -151,8 +151,8 @@ Title で `地番検索`として場合に表示される検索。
 **Columns**
 字コード表の表示情報
 
-| --- | --- | --- |
 | Property | Description | Type |
+| --- | --- | --- |
 | Name | テーブルのカラム名 | str |
 | View | 表示するカラム名 | str |
 
@@ -175,8 +175,8 @@ Title で `所有者検索`として場合に表示される検索。
 
 QGISで読み込んでいるレイヤを検索対象とする。
 
-| --- | --- | --- |
 | Property | Description | Type |
+| --- | --- | --- |
 | LayerType | 読み込むレイヤの種類を選択 | Literal["Name", "File", "Database"] |
 | Name | QGIS上のレイヤ名 | str |
 
@@ -184,8 +184,8 @@ QGISで読み込んでいるレイヤを検索対象とする。
 
 地図ファイルを検索対象とする。
 
-| --- | --- | --- |
 | Property | Description | Type |
+| --- | --- | --- |
 | LayerType | 読み込むレイヤの種類を選択 | Literal["Name", "File", "Database"] |
 | Path | 読み込むファイル名 | FilePath |
 | Encoding | 読み込むファイルのエンコーディング | str |
@@ -194,8 +194,8 @@ QGISで読み込んでいるレイヤを検索対象とする。
 
 データベースのテーブルを検索対象とする
 
-| --- | --- | --- |
 | Property | Description | Type |
+| --- | --- | --- |
 | LayerType | 読み込むレイヤの種類を選択 | Literal["Name", "File", "Database"] |
 | DataType | 接続するデータベース | Literal["postgres"] |
 | Host | データベースのアドレス | str |
@@ -213,15 +213,16 @@ QGISで読み込んでいるレイヤを検索対象とする。
 
 検索に使用するレイヤの属性情報の設定です。
 
-| --- | --- | --- |
 | Property | Description | Type |
+| --- | --- | --- |
 | FieldType | 検索属性名のタイプ。現在未使用。 | Literal["Text"] |
 | ViewName | 表示する属性名 | str |
 | Field | レイヤの属性名 | str |
 
 ## その他
 
+| Property | Description | Type |
+| --- | --- | --- |
 | SampleFields | 未使用 | list[str] |
 | SampleTableLimit | 未使用 | list[str] |
 
-```
