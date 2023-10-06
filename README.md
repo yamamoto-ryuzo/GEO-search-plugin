@@ -105,3 +105,123 @@
 ### 所有者検索
 
 - 氏名の間にあるスペースの処遇
+
+
+#設定ファイル説明
+## SearchTab
+
+| --- | --- | --- |
+| Property | Description | Type |
+| Title | タブに表示されるタイトル。タイトルが地番検索・所有者検索の場合特殊検索になる。 | str |
+| Group | タブをまとめるタブグループ、グループ名となり同名グループでまとまる。 | str |
+| Layer | 読み込むレイヤ情報 | dict |
+| SearchField | 検索対象の属性情報 | dict |
+| SearchFields | 検索対象の属性情報 | list[dict] |
+| ViewFields | 検索結果で表示するレイヤ属性 | list[str]
+| Message | 左下のヘルプボタンで表示するテキスト | str |
+| TibanField | 地番の属性名 | str |
+| AzaTable | 地番検索用: 字コード設定 | dict |
+
+### 特殊検索
+#### 地番検索
+
+Title で `地番検索`として場合に表示される検索。
+
+地番検索用の設定
+| --- | --- | --- |
+| Property | Description | Type |
+| TibanField | 地番の属性名 | str |
+| AzaTable | 地番検索用: 字コード設定 | dict |
+
+**AzaTable**
+字コード表を表示するための情報
+
+| --- | --- | --- |
+| Property | Description | Type |
+| DataType | 接続するデータベース | Literal["postgres"] |
+| Host | データベースのアドレス | str |
+| Port | データベースのポート | str |
+| Database | データベース名 | str |
+| User | データベースのユーザー名 | str |
+| Password | データベースのパスワード | str |
+| Schema | 読み込むスキーマ名 | str |
+| Table | テーブル名 | str |
+| Columns | 字コード表 | dict |
+
+**Columns**
+字コード表の表示情報
+
+| --- | --- | --- |
+| Property | Description | Type |
+| Name | テーブルのカラム名 | str |
+| View | 表示するカラム名 | str |
+
+
+#### 所有者検索
+
+Title で `所有者検索`として場合に表示される検索。
+
+### Layer: レイヤ読み込み設定
+
+検索タブでは、使用するレイヤにより設定方法が違う
+
+読み込めるタイプ
+
+* レイヤ
+* ファイル
+* データベース
+
+#### レイヤ
+
+QGISで読み込んでいるレイヤを検索対象とする。
+
+| --- | --- | --- |
+| Property | Description | Type |
+| LayerType | 読み込むレイヤの種類を選択 | Literal["Name", "File", "Database"] |
+| Name | QGIS上のレイヤ名 | str |
+
+#### ファイル
+
+地図ファイルを検索対象とする。
+
+| --- | --- | --- |
+| Property | Description | Type |
+| LayerType | 読み込むレイヤの種類を選択 | Literal["Name", "File", "Database"] |
+| Path | 読み込むファイル名 | FilePath |
+| Encoding | 読み込むファイルのエンコーディング | str |
+
+#### データベース
+
+データベースのテーブルを検索対象とする
+
+| --- | --- | --- |
+| Property | Description | Type |
+| LayerType | 読み込むレイヤの種類を選択 | Literal["Name", "File", "Database"] |
+| DataType | 接続するデータベース | Literal["postgres"] |
+| Host | データベースのアドレス | str |
+| Port | データベースのポート | str |
+| Database | データベース名 | str |
+| User | データベースのユーザー名 | str |
+| Password | データベースのパスワード | str |
+| Schema | 読み込むスキーマ名 | str |
+| Table | テーブル名 | str |
+| Key | テーブルのユニークキー | str |
+| Geometry | テーブルのGeometryカラム名 | str |
+| FormatSQL | Viewを作成するSQLなどを指定する | FilePath |
+
+### SearchField
+
+検索に使用するレイヤの属性情報の設定です。
+
+| --- | --- | --- |
+| Property | Description | Type |
+| FieldType | 検索属性名のタイプ。現在未使用。 | Literal["Text"] |
+| ViewName | 表示する属性名 | str |
+| Field | レイヤの属性名 | str |
+
+## その他
+
+| SampleFields | 未使用 | list[str] |
+| SampleTableLimit | 未使用 | list[str] |
+
+```
