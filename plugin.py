@@ -155,7 +155,6 @@ class plugin(object):
                     self._search_features.append(feature)
 
             if self.dialog.tab_groups:
-                print(self.dialog.tab_groups)
                 self.change_tab_group(0)
                 self.dialog.tabWidget.currentChanged.connect(self.change_tab_group)
             else:
@@ -179,6 +178,7 @@ class plugin(object):
         self._search_features = self._search_group_features[tab_text]
         self._current_group_widget.currentChanged.connect(self.change_search_feature)
         self._current_group_widget.setCurrentIndex(0)
+        self.change_search_feature(0)
 
     def change_search_feature(self, index):
         if self.current_feature:
