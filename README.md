@@ -112,7 +112,7 @@
 | Property | Description | Type |
 | --- | --- | --- |
 | Title | タブに表示されるタイトル。タイトルが地番検索・所有者検索の場合特殊検索になる。 | str |
-| Group | タブをまとめるタブグループ、グループ名となり同名グループでまとまる。 | str |
+| group | タブをまとめるタブグループ、グループ名となり同名グループでまとまる。 | str |
 | Layer | 読み込むレイヤ情報 | dict |
 | SearchField | 検索対象の属性情報 | dict |
 | SearchFields | 検索対象の属性情報 | list[dict] |
