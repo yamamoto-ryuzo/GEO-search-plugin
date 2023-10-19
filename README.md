@@ -5,7 +5,7 @@
 　地番の所有者検索  
 ![image](https://user-images.githubusercontent.com/86514652/183770143-61080ecd-7f55-4647-965a-206bc79191d1.png)  
 　汎用的な検索  
-![image](https://user-images.githubusercontent.com/86514652/183770212-813b8b44-e19f-4c50-a5ec-5df970539e17.png)  
+![image](https://github.com/yamamoto-ryuzo/GEO-search-plugin/assets/86514652/4483e588-2c1d-4133-9cfe-fc33bb9a5068)  
 ## 設定項目
 
 ```json
