@@ -90,6 +90,25 @@
 }
 ```
 
+## 設定項目(プロジェクト変数「GEO-search-plugin」の設定例)  
+    {
+      "group": "ﾌﾟﾛｼﾞｪｸﾄ検索",
+      "Title": "市区町村",
+      "Layer": {
+        "LayerType": "Name",
+        "Name": "行政区域",
+        "Encoding": "cp932"
+      },
+      "SearchField": {
+        "FieldType": "Text",
+        "ViewName": "市区町村名",
+        "Field": "市区町村名"
+      },
+      "ViewFields": ["N03_001","N03_004","N03_007"]
+    }
+
+
+
 ## 課題
 
 ### 全体
@@ -116,7 +135,7 @@
 | Layer | 読み込むレイヤ情報 | dict |
 | SearchField | 検索対象の属性情報 | dict |
 | SearchFields | 検索対象の属性情報 | list[dict] |
-| ViewFields | 検索結果で表示するレイヤ属性 | list[str]
+| ViewFields | 検索結果で表示するレイヤ属性（名前：別名はNG） | list[str]
 | Message | 左下のヘルプボタンで表示するテキスト | str |
 | TibanField | 地番の属性名 | str |
 | AzaTable | 地番検索用: 字コード設定 | dict |
