@@ -48,10 +48,10 @@ def main():
         return
     new_version = bump_version(version)
     update_metadata_version(metadata_path, new_version)
-    plugin_name = get_plugin_name(metadata_path)
+    plugin_name = 'GEO-search-plugin-main'
     zip_name = f'{plugin_name}_{new_version}.zip'
     remove_old_zip(plugin_name)
-    plugin_dir = f'{plugin_name}'
+    plugin_dir = plugin_name
     if os.path.exists(plugin_dir):
         shutil.rmtree(plugin_dir)
     os.mkdir(plugin_dir)
@@ -59,7 +59,7 @@ def main():
     includes = [
         '__init__.py', 'metadata.txt', 'plugin.py', 'constants.py', 'searchfeature.py', 'searchdialog.py',
         'resultdialog.py', 'autodialog.py', 'utils.py', 'resources.py', 'resources.qrc',
-        'setting.json', 'README.md', 'view.sql', 'icon', 'ui', 'widget', 'i18n', 'jaconv'
+        'setting.json', 'README.md', 'view.sql', 'icon', 'ui', 'widget', 'i18n', 'jaconv', 'LICENSE'
     ]
     for item in includes:
         if os.path.isdir(item):
