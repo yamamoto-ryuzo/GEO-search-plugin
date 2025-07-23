@@ -29,10 +29,31 @@ from .searchdialog import SearchDialog
 class plugin(object):
     def __init__(self, iface):
         self.iface = iface
+        self._init_language()
         self.current_feature = None
         self._current_group_widget = None
         self._search_features = []
         self._search_group_features = OrderedDict()
+
+    def _init_language(self):
+        """QGISとプラグインの言語設定を自動化"""
+        try:
+            from qgis.PyQt.QtCore import QSettings, QLocale, QTranslator
+            from qgis.PyQt.QtWidgets import QApplication
+            import os
+            # QGISの設定から言語取得（なければOSのロケール）
+            settings = QSettings()
+            lang = settings.value('locale/userLocale', QLocale.system().name())
+            if lang:
+                settings.setValue('locale/userLocale', lang)
+            # プラグインの翻訳ファイルをロード
+            translator = QTranslator()
+            qm_path = os.path.join(os.path.dirname(__file__), 'i18n', f'{lang}.qm')
+            if os.path.exists(qm_path):
+                translator.load(qm_path)
+                QApplication.instance().installTranslator(translator)
+        except Exception as e:
+            pass  # エラーは無視（QGIS外実行時など）
 
     def initGui(self):
         # プラグイン開始時に動作

@@ -1,7 +1,4 @@
-# -*- coding: utf-8 -*-
-
+from .plugin import plugin
 
 def classFactory(iface):
-    from .plugin import plugin
-
     return plugin(iface)
