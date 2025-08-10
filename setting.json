@@ -1,0 +1,15 @@
+    {
+      "group": "各種レイヤ",
+      "Title": "カレントレイヤ",
+      "Layer": {
+        "LayerType": "Name",
+        "Name": "行政区域",
+        "Encoding": "cp932"
+      },
+      "SearchField": {
+        "FieldType": "Text",
+        "ViewName": "市区町村名",
+        "Field": "市区町村名"
+      },
+      "ViewFields": []
+    }
