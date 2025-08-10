@@ -22,10 +22,11 @@ from .utils import name2layer, unique_values, get_feature_by_id
 class SearchFeature(object):
 
     @property
-    def current_layer(self):
-        # 検索時点のカレントレイヤを返す
-        layer = self.load_layer(self._layer_setting) if hasattr(self, '_layer_setting') else None
-        return self.iface.activeLayer() if layer is None else layer
+    def layer(self):
+        # レイヤ指定がなければ常に最新のカレントレイヤを返す
+        if not hasattr(self, '_layer_setting') or not self._layer_setting:
+            return self.iface.activeLayer()
+        return self.load_layer(self._layer_setting)
     def __init__(self, iface, setting, widget, andor=" And ", page_limit=1000):
         self.iface = iface
         self.setting = setting
@@ -33,11 +34,10 @@ class SearchFeature(object):
         self.title = setting["Title"]
         self.view_fields = setting["ViewFields"]
         self.sample_fields = setting.get("SampleFields", [])
-        layer_setting = setting.get("Layer")
-        self.layer = self.load_layer(layer_setting)
-        if layer_setting and isinstance(layer_setting, dict):
-            self.layer_type = layer_setting.get("LayerType")
-            self.layer_name = layer_setting.get("Name")
+        self._layer_setting = setting.get("Layer")
+        if self._layer_setting and isinstance(self._layer_setting, dict):
+            self.layer_type = self._layer_setting.get("LayerType")
+            self.layer_name = self._layer_setting.get("Name")
         else:
             self.layer_type = None
             self.layer_name = None
@@ -53,22 +53,13 @@ class SearchFeature(object):
         self.result_dialog.tableWidget.itemPressed.connect(self.zoom_items)
 
         self.sample_table_task = None
-        if isinstance(self.layer, QgsVectorLayer):
-            self.widget.setEnabled(self.layer.isValid())
-        else:
-            self.widget.setEnabled(False)
+        # 検索ウィジェットは常に有効化（カレントレイヤがNoneでも入力可能にする）
+        self.widget.setEnabled(True)
 
-    @property
-    def layer(self):
-        return self.__layer
-
-    @layer.setter
-    def layer(self, layer):
-        self.__layer = layer
 
     @property
     def view_fields(self):
-        layer = self.current_layer
+        layer = self.layer
         if not layer:
             return []
         layer_fields = [field for field in layer.fields()]
@@ -86,7 +77,7 @@ class SearchFeature(object):
 
     @property
     def sample_fields(self):
-        layer = self.current_layer
+        layer = self.layer
         if not layer:
             return []
         layer_fields = [field for field in layer.fields()]
@@ -259,7 +250,7 @@ class SearchTextFeature(SearchFeature):
 
     def set_suggest(self):
         """サジェスト表示"""
-        layer = self.current_layer
+        layer = self.layer
         if not layer:
             return
 
@@ -270,7 +261,7 @@ class SearchTextFeature(SearchFeature):
             search_widget.setCompleter(comp)
 
     def search_feature(self, limit=None):
-        layer = self.current_layer
+        layer = self.layer
         if not layer:
             return []
         expres_list = []
