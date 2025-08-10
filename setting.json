@@ -2,9 +2,6 @@
       "group": "各種レイヤ",
       "Title": "カレントレイヤ",
       "Layer": {
-        "LayerType": "Name",
-        "Name": "行政区域",
-        "Encoding": "cp932"
       },
       "SearchField": {
       },

@@ -20,6 +20,12 @@ from .utils import name2layer, unique_values, get_feature_by_id
 
 
 class SearchFeature(object):
+
+    @property
+    def current_layer(self):
+        # 検索時点のカレントレイヤを返す
+        layer = self.load_layer(self._layer_setting) if hasattr(self, '_layer_setting') else None
+        return self.iface.activeLayer() if layer is None else layer
     def __init__(self, iface, setting, widget, andor=" And ", page_limit=1000):
         self.iface = iface
         self.setting = setting
@@ -27,9 +33,14 @@ class SearchFeature(object):
         self.title = setting["Title"]
         self.view_fields = setting["ViewFields"]
         self.sample_fields = setting.get("SampleFields", [])
-        self.layer = self.load_layer(setting["Layer"])
-        self.layer_type = setting["Layer"]["LayerType"]
-        self.layer_name = setting["Layer"].get("Name")
+        layer_setting = setting.get("Layer")
+        self.layer = self.load_layer(layer_setting)
+        if layer_setting and isinstance(layer_setting, dict):
+            self.layer_type = layer_setting.get("LayerType")
+            self.layer_name = layer_setting.get("Name")
+        else:
+            self.layer_type = None
+            self.layer_name = None
         self.message = setting.get("Message")
         self.suggest_flg = setting.get("Suggest", False)
 
@@ -57,10 +68,13 @@ class SearchFeature(object):
 
     @property
     def view_fields(self):
-        layer_fields = [field for field in self.layer.fields()]
+        layer = self.current_layer
+        if not layer:
+            return []
+        layer_fields = [field for field in layer.fields()]
         if not self.__view_fields:
             return layer_fields
-        fields = self.layer.fields()
+        fields = layer.fields()
         setting_fields = [fields.indexFromName(field) for field in self.__view_fields]
         return [
             layer_fields[fid] for fid in setting_fields if fid != -1
@@ -72,12 +86,13 @@ class SearchFeature(object):
 
     @property
     def sample_fields(self):
-        if not self.layer:
+        layer = self.current_layer
+        if not layer:
             return []
-        layer_fields = [field for field in self.layer.fields()]
+        layer_fields = [field for field in layer.fields()]
         if not self.__sample_fields:
             return layer_fields
-        fields = self.layer.fields()
+        fields = layer.fields()
         setting_fields = [fields.indexFromName(field) for field in self.__sample_fields]
         return [
             layer_fields[fid] for fid in setting_fields if fid != -1
@@ -88,6 +103,10 @@ class SearchFeature(object):
         self.__sample_fields = fields
 
     def load_layer(self, setting):
+        # レイヤ設定がなければカレントレイヤを返す
+        if not setting or not isinstance(setting, dict) or not setting.get("LayerType"):
+            # iface.activeLayer() でカレントレイヤ取得
+            return self.iface.activeLayer()
         layer_type = setting["LayerType"]
         layer_name = setting.get("Name")
         if layer_type == "Name":
@@ -240,17 +259,18 @@ class SearchTextFeature(SearchFeature):
 
     def set_suggest(self):
         """サジェスト表示"""
-        if not self.layer:
+        layer = self.current_layer
+        if not layer:
             return
 
         for field, search_widget in zip(self.fields, self.widget.search_widgets):
             field_name = field["Field"]
-            suggest_list = map(str, unique_values(self.layer, field_name))
+            suggest_list = map(str, unique_values(layer, field_name))
             comp = QCompleter(suggest_list)
             search_widget.setCompleter(comp)
 
     def search_feature(self, limit=None):
-        layer = self.layer
+        layer = self.current_layer
         if not layer:
             return []
         expres_list = []
