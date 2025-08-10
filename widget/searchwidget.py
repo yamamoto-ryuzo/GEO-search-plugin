@@ -23,7 +23,12 @@ class SearchWidget(QWidget):
         super(SearchWidget, self).__init__(parent=parent)
         search_fields = setting.get("SearchFields")
         if not search_fields:
-            search_fields = [setting.get("SearchField")]
+            search_field = setting.get("SearchField")
+            # If SearchField is empty, use only "All"
+            if not search_field or (isinstance(search_field, dict) and not search_field):
+                search_fields = [{"ViewName": "All", "all": True}]
+            else:
+                search_fields = [search_field]
         widgets = self.create_widgets(search_fields)
         self._dialog = None
         self.init_layout(widgets)
@@ -59,10 +64,32 @@ class SearchTextWidget(SearchWidget):
     def create_widgets(self, setting):
         self.labels = []
         self.search_widgets = []
-        for field in setting:
+        all_field_index = None
+        for idx, field in enumerate(setting):
             label, edit = self.create_widget(field)
             self.labels.append(label)
             self.search_widgets.append(edit)
+            if field.get("all"):
+                all_field_index = idx
+
+        # QLineEdit for "All" field
+        all_field_edit = self.search_widgets[all_field_index] if all_field_index is not None else None
+
+        # Enable only "All" or other fields
+        def update_fields():
+            if all_field_edit and all_field_edit.text():
+                # Disable all except "All"
+                for i, edit in enumerate(self.search_widgets):
+                    if i != all_field_index:
+                        edit.setDisabled(True)
+            else:
+                for i, edit in enumerate(self.search_widgets):
+                    if i != all_field_index:
+                        edit.setDisabled(False)
+
+        if all_field_edit:
+            all_field_edit.textChanged.connect(update_fields)
+            update_fields()
 
         widgets = []
         for i in zip(self.labels, self.search_widgets):
@@ -73,6 +100,9 @@ class SearchTextWidget(SearchWidget):
     def create_widget(self, field):
         label = QLabel("{}: ".format(field["ViewName"]))
         line_edit = QLineEdit()
+        # For "All" field, set placeholder
+        if field.get("all"):
+            line_edit.setPlaceholderText("Search all fields")
         return label, line_edit
 
 

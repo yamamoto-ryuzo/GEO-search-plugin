@@ -7,9 +7,6 @@
         "Encoding": "cp932"
       },
       "SearchField": {
-        "FieldType": "Text",
-        "ViewName": "市区町村名",
-        "Field": "市区町村名"
       },
       "ViewFields": []
     }
