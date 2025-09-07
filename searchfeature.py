@@ -203,22 +203,135 @@ class SearchFeature(object):
         value = item.data(self.data_role)
         self.zoom_features([value])
 
-    def zoom_items(self):
+    def zoom_items(self, item=None):
         # support tabbed tables: prefer dialog's current_table if present
         table = getattr(self.result_dialog, 'current_table', None) or getattr(self.result_dialog, 'tableWidget', None)
         if table is None:
             return
-        items = table.selectedItems()
-        self.zoom_features([item.data(self.data_role) for item in items])
+        # if this was called from an itemPressed signal, an item may be provided
+        if item is not None:
+            try:
+                fid = item.data(self.data_role)
+                from qgis.core import QgsMessageLog
+                layer_name = (getattr(table, 'parent', lambda: None)() and getattr(self.result_dialog._tabs[self.result_dialog.tabWidget.currentIndex()], 'get', lambda *a, **k: None)('layer'))
+                QgsMessageLog.logMessage(f"zoom_items (itemPressed): item fid={fid} on layer={layer_name}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+            # determine target layer for current tab
+            try:
+                idx = getattr(self.result_dialog, 'tabWidget', None).currentIndex()
+                tab = self.result_dialog._tabs[idx]
+                layer = tab.get('layer') or self.layer
+            except Exception:
+                layer = self.layer
 
-    def zoom_features(self, feature_ids=None):
-        """検索結果にズーム"""
-        if feature_ids is None and not self.result_features:
+            self.zoom_features([fid], layer=layer)
             return
-        elif feature_ids is None:
-            feature_ids = self.result_features.keys()
-        self.layer.selectByIds(feature_ids)
-        self.iface.mapCanvas().zoomToSelected(self.layer)
+
+        items = table.selectedItems()
+        # determine the layer associated with the currently visible tab (if available)
+        layer = None
+        try:
+            idx = getattr(self.result_dialog, 'tabWidget', None).currentIndex()
+            tab = self.result_dialog._tabs[idx]
+            layer = tab.get('layer') or self.layer
+        except Exception:
+            layer = self.layer
+
+        ids = [item.data(self.data_role) for item in items]
+        # if no items returned (depends on selection mode), try to gather ids by selected rows/indexes
+        if not ids:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("zoom_items: selectedItems() returned empty, trying selectedIndexes/currentRow fallback", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+            rows = set()
+            try:
+                indexes = table.selectedIndexes()
+                for idx in indexes:
+                    rows.add(idx.row())
+            except Exception:
+                # fallback to currentRow
+                try:
+                    r = table.currentRow()
+                    if r is not None and r >= 0:
+                        rows.add(r)
+                except Exception:
+                    rows = set()
+
+            # collect ids from first non-empty column cell in each row
+            for r in sorted(rows):
+                cols = table.columnCount()
+                fid = None
+                for c in range(cols):
+                    try:
+                        it = table.item(r, c)
+                        if it is not None:
+                            v = it.data(self.data_role)
+                            if v is not None:
+                                fid = v
+                                break
+                    except Exception:
+                        continue
+                if fid is not None:
+                    ids.append(fid)
+        try:
+            # log selection and target layer
+            from qgis.core import QgsMessageLog
+            layer_name = layer.name() if layer is not None else 'None'
+            QgsMessageLog.logMessage(f"zoom_items: selected {len(ids)} items on layer={layer_name}, ids={ids}", "GEO-search-plugin", 0)
+        except Exception:
+            pass
+
+        self.zoom_features(ids, layer=layer)
+
+    def zoom_features(self, feature_ids=None, layer=None):
+        """検索結果にズーム。feature_ids はシーケンス。layer を指定するとそのレイヤで選択・ズームする。"""
+    # resolve feature ids
+        if feature_ids is None:
+            try:
+                feature_ids = list(self.result_features.keys())
+            except Exception:
+                feature_ids = []
+
+        # normalize ids to ints and remove duplicates
+        ids = []
+        for fid in feature_ids:
+            try:
+                i = int(fid)
+            except Exception:
+                continue
+            if i not in ids:
+                ids.append(i)
+
+        if not ids:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("zoom_features: no valid feature ids to zoom", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+            return
+
+        # resolve layer to operate on
+        target_layer = layer or self.layer
+        if not target_layer:
+            return
+
+        try:
+            from qgis.core import QgsMessageLog
+            layer_name = getattr(target_layer, 'name', lambda: 'Unknown')()
+            QgsMessageLog.logMessage(f"zoom_features: attempting selectByIds on layer={layer_name} ids={ids}", "GEO-search-plugin", 0)
+            target_layer.selectByIds(ids)
+            self.iface.mapCanvas().zoomToSelected(target_layer)
+            QgsMessageLog.logMessage(f"zoom_features: zoomed to selected on layer={layer_name}", "GEO-search-plugin", 0)
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"zoom_features: failed to zoom on layer={getattr(target_layer, 'name', lambda: 'Unknown')()} ids={ids} error={e}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+            return
 
     def show_features(self):
         """検索結果を表示する"""
