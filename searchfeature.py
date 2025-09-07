@@ -234,6 +234,15 @@ class SearchFeature(object):
                 layers.append(layer)
         return layers
 
+    def get_all_vector_layers(self):
+        """プロジェクト内の全てのベクタレイヤを返す"""
+        project = QgsProject.instance()
+        layers = []
+        for layer in project.mapLayers().values():
+            if isinstance(layer, QgsVectorLayer):
+                layers.append(layer)
+        return layers
+
     def add_search_task(self):
         task = QgsTask.fromFunction(
             "地図検索",
@@ -420,11 +429,14 @@ class SearchTextFeature(SearchFeature):
     def show_features(self):
         """表示レイヤ用の検索処理: タイトルが「表示レイヤ」の場合、現在表示中のベクタレイヤを順に検索して集約表示する"""
         # 通常の動作（設定レイヤまたはカレントレイヤ）
-        if self.title != "表示レイヤ":
+        if self.title not in ("表示レイヤ", "全レイヤ"):
             return super(SearchTextFeature, self).show_features()
 
-        # 表示レイヤ検索: 表示中のベクタレイヤを取得して各レイヤで検索を実行
-        layers = self.get_visible_vector_layers()
+        # 表示レイヤ検索 or 全レイヤ検索: 対象レイヤを取得して各レイヤで検索を実行
+        if self.title == "表示レイヤ":
+            layers = self.get_visible_vector_layers()
+        else:
+            layers = self.get_all_vector_layers()
         all_features = []
         all_fields = []
         for layer in layers:
