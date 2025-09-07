@@ -215,6 +215,25 @@ class SearchFeature(object):
         self.result_dialog.set_features(self.view_fields, features)
         self.result_dialog.show()
 
+    def get_visible_vector_layers(self):
+        """現在マップ上で表示されているベクタレイヤ一覧を返す"""
+        project = QgsProject.instance()
+        root = project.layerTreeRoot()
+        layers = []
+        for layer in project.mapLayers().values():
+            try:
+                node = root.findLayer(layer.id())
+            except Exception:
+                node = None
+            if node is None:
+                continue
+            # node.isVisible() はレイヤツリー上の可視状態を返す
+            if not node.isVisible():
+                continue
+            if isinstance(layer, QgsVectorLayer):
+                layers.append(layer)
+        return layers
+
     def add_search_task(self):
         task = QgsTask.fromFunction(
             "地図検索",
@@ -396,6 +415,110 @@ class SearchTextFeature(SearchFeature):
                 attrs[f"{field_name}({alias})"] = str(value)
             QgsMessageLog.logMessage(f"[RESULT] Feature {i+1}: {attrs}", "GEO-search-plugin", 0)
         
+        return features
+
+    def show_features(self):
+        """表示レイヤ用の検索処理: タイトルが「表示レイヤ」の場合、現在表示中のベクタレイヤを順に検索して集約表示する"""
+        # 通常の動作（設定レイヤまたはカレントレイヤ）
+        if self.title != "表示レイヤ":
+            return super(SearchTextFeature, self).show_features()
+
+        # 表示レイヤ検索: 表示中のベクタレイヤを取得して各レイヤで検索を実行
+        layers = self.get_visible_vector_layers()
+        all_features = []
+        all_fields = []
+        for layer in layers:
+            # 一時的に現在のレイヤ設定を退避してlayerを使って検索
+            original_layer_setting = getattr(self, '_layer_setting', None)
+            try:
+                # monkey-patch: self.layer プロパティは load_layer を使うが直接置き換えが簡単
+                # perform per-layer search using the existing search_feature logic
+                # We'll call a helper that accepts a concrete layer
+                features = self._search_on_layer(layer)
+            finally:
+                # restore
+                self._layer_setting = original_layer_setting
+            if features:
+                # for display, we need fields for this layer; use layer.fields()
+                # attach layer reference to features via tuple (layer, feature)
+                for f in features:
+                    all_features.append((layer, f))
+
+        # If no results, show empty
+        if not all_features:
+            self.result_dialog.set_features([], [])
+            self.result_dialog.show()
+            return
+
+        # For display, pick fields from the first layer (mixed-layer display may be inconsistent)
+        first_layer = all_features[0][0]
+        fields = [field for field in first_layer.fields()]
+        # Convert tuples back to features for the dialog
+        features_only = [t[1] for t in all_features]
+        self.result_dialog.set_features(fields, features_only)
+        self.result_dialog.show()
+
+    def _search_on_layer(self, layer):
+        """既存の search_feature ロジックを再利用して与えたレイヤで検索を実行するヘルパー
+        注意: 現状の search_feature は self.layer を参照するため、ここでは一時的に
+        self._layer_setting を None にして iface.activeLayer を上書きするより、
+        直接レイヤを利用して類似の処理を行う簡易コピーを実装する。
+        """
+        # コピーしたロジックの簡易版: 全フィールド検索 or 通常検索に対応
+        if not layer or not layer.isValid():
+            return []
+        # check all-field
+        from qgis.core import QgsMessageLog, QgsExpression, QgsFeatureRequest
+
+        all_field_search = False
+        all_value = None
+        for field, search_widget in zip(self.fields, self.widget.search_widgets):
+            if field == {}:
+                all_value = search_widget.text()
+                if all_value:
+                    all_field_search = True
+                break
+
+        if all_field_search:
+            # string fields
+            string_fields = []
+            for field in layer.fields():
+                if field.type() == 10:
+                    string_fields.append(field.name())
+            if not string_fields:
+                return []
+            concat_fields = " || ' ' || ".join([f'COALESCE("{field}", \'\')' for field in string_fields])
+            full_text_expr = f'({concat_fields}) LIKE \'%{all_value}%\''
+            expression = QgsExpression(full_text_expr)
+            if expression.hasEvalError():
+                return []
+            request = QgsFeatureRequest(expression)
+            features = list(layer.getFeatures(request))
+            return features
+
+        # normal field search
+        expres_list = []
+        for field, search_widget in zip(self.fields, self.widget.search_widgets):
+            if field.get("all"):
+                continue
+            field_name = field.get("Field") or field.get("ViewName")
+            value = search_widget.text()
+            if not value:
+                continue
+            # check alias
+            if layer and layer.fields().indexFromName(field_name) == -1:
+                for layer_field in layer.fields():
+                    if layer_field.alias() == field_name:
+                        field_name = layer_field.name()
+                        break
+            expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=value))
+
+        if not expres_list:
+            return []
+        expression_str = self.andor.join(expres_list)
+        expression = QgsExpression(expression_str)
+        request = QgsFeatureRequest(expression)
+        features = list(layer.getFeatures(request))
         return features
 
 
