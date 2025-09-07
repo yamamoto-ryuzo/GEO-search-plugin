@@ -49,8 +49,17 @@ class SearchFeature(object):
         self.data_role = 15
         self.andor = andor
         self.result_dialog = ResultDialog(widget.parent(), page_limit=page_limit)
-        self.result_dialog.tableWidget.itemSelectionChanged.connect(self.zoom_items)
-        self.result_dialog.tableWidget.itemPressed.connect(self.zoom_items)
+        # Connect to dialog-level signals (ResultDialog forwards table signals)
+        try:
+            self.result_dialog.selectionChanged.connect(self.zoom_items)
+            self.result_dialog.itemPressed.connect(self.zoom_items)
+        except Exception:
+            # fallback to legacy table widget signals if necessary
+            try:
+                self.result_dialog.tableWidget.itemSelectionChanged.connect(self.zoom_items)
+                self.result_dialog.tableWidget.itemPressed.connect(self.zoom_items)
+            except Exception:
+                pass
 
         self.sample_table_task = None
         # 検索ウィジェットは常に有効化（カレントレイヤがNoneでも入力可能にする）
@@ -195,7 +204,11 @@ class SearchFeature(object):
         self.zoom_features([value])
 
     def zoom_items(self):
-        items = self.result_dialog.tableWidget.selectedItems()
+        # support tabbed tables: prefer dialog's current_table if present
+        table = getattr(self.result_dialog, 'current_table', None) or getattr(self.result_dialog, 'tableWidget', None)
+        if table is None:
+            return
+        items = table.selectedItems()
         self.zoom_features([item.data(self.data_role) for item in items])
 
     def zoom_features(self, feature_ids=None):
@@ -212,7 +225,12 @@ class SearchFeature(object):
         if not self.layer:
             return
         features = self.search_feature()
-        self.result_dialog.set_features(self.view_fields, features)
+        # Always present results as per-layer tabs, even for single (current) layer
+        try:
+            self.result_dialog.set_features_by_layer([(self.layer, self.view_fields, features)])
+        except Exception:
+            # fallback to legacy single-table API
+            self.result_dialog.set_features(self.view_fields, features)
         self.result_dialog.show()
 
     def get_visible_vector_layers(self):
@@ -264,7 +282,11 @@ class SearchFeature(object):
     def search_finished(self, exception, result=None):
         if result is None:
             result = []
-        self.result_dialog.set_features(self.view_fields, result)
+        # show results as per-layer tab(s)
+        try:
+            self.result_dialog.set_features_by_layer([(self.layer, self.view_fields, result)])
+        except Exception:
+            self.result_dialog.set_features(self.view_fields, result)
 
 
 # "通常の検索"
@@ -462,12 +484,18 @@ class SearchTextFeature(SearchFeature):
             self.result_dialog.show()
             return
 
-        # For display, pick fields from the first layer (mixed-layer display may be inconsistent)
-        first_layer = all_features[0][0]
-        fields = [field for field in first_layer.fields()]
-        # Convert tuples back to features for the dialog
-        features_only = [t[1] for t in all_features]
-        self.result_dialog.set_features(fields, features_only)
+        # Build per-layer lists for tabbed display
+        layers_map = []
+        for layer, feature in all_features:
+            # find existing entry
+            entry = next((e for e in layers_map if e[0] == layer), None)
+            if entry is None:
+                layers_map.append([layer, [field for field in layer.fields()], [feature]])
+            else:
+                entry[2].append(feature)
+
+        # call new API to set per-layer tabs
+        self.result_dialog.set_features_by_layer([(e[0], e[1], e[2]) for e in layers_map])
         self.result_dialog.show()
 
     def _search_on_layer(self, layer):
