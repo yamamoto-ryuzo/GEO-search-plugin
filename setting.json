@@ -1,9 +1,21 @@
     {
       "group": "各種レイヤ",
       "Title": "カレントレイヤ",
-      "Layer": {
-      },
-      "SearchField": {
-      },
+      "Layer": {},
+      "SearchField": {},
+      "ViewFields": []
+    },
+    {
+      "group": "各種レイヤ",
+      "Title": "表示レイヤ",
+      "Layer": {},
+      "SearchField": {},
+      "ViewFields": []
+    },
+    {
+      "group": "各種レイヤ",
+      "Title": "全レイヤ",
+      "Layer": {},
+      "SearchField": {},
       "ViewFields": []
     }
