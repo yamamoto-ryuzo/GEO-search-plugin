@@ -351,27 +351,48 @@ class SearchFeature(object):
         project = QgsProject.instance()
         root = project.layerTreeRoot()
         layers = []
-        for layer in project.mapLayers().values():
+        # iterate layer-tree nodes so the same layer referenced by multiple nodes
+        # is seen once per node (preserve duplicates from the tree)
+        try:
+            nodes = root.findLayers()
+        except Exception:
+            nodes = []
+
+        for node in nodes:
             try:
-                node = root.findLayer(layer.id())
+                if not node.isVisible():
+                    continue
+                layer = node.layer()
+                if layer is None:
+                    continue
+                if isinstance(layer, QgsVectorLayer):
+                    # return tuple (node, layer) so callers can distinguish nodes
+                    layers.append((node, layer))
             except Exception:
-                node = None
-            if node is None:
                 continue
-            # node.isVisible() はレイヤツリー上の可視状態を返す
-            if not node.isVisible():
-                continue
-            if isinstance(layer, QgsVectorLayer):
-                layers.append(layer)
+
         return layers
 
     def get_all_vector_layers(self):
         """プロジェクト内の全てのベクタレイヤを返す"""
         project = QgsProject.instance()
+        root = project.layerTreeRoot()
         layers = []
-        for layer in project.mapLayers().values():
-            if isinstance(layer, QgsVectorLayer):
-                layers.append(layer)
+        try:
+            nodes = root.findLayers()
+        except Exception:
+            nodes = []
+
+        for node in nodes:
+            try:
+                layer = node.layer()
+                if layer is None:
+                    continue
+                if isinstance(layer, QgsVectorLayer):
+                    layers.append((node, layer))
+            except Exception:
+                continue
+
         return layers
 
     def add_search_task(self):
@@ -441,125 +462,70 @@ class SearchTextFeature(SearchFeature):
                 QgsMessageLog.logMessage(f"DEBUG: field={{}} (All), text={search_widget.text()}", "GEO-search-plugin", 0)
                 break
         if all_field_search:
-            # --- all_field_search 実行箇所 ---
-            import os
-            QgsMessageLog.logMessage("[INFO] all_field_search is executed: searching all fields.", "GEO-search-plugin", 0)
-            QgsMessageLog.logMessage(f"[DEBUG] searchfeature.py path: {os.path.abspath(__file__)}", "GEO-search-plugin", 0)
-            
-            # レイヤの詳細情報をログ出力
-            QgsMessageLog.logMessage(f"[DEBUG] layer: {self.layer}", "GEO-search-plugin", 0)
-            QgsMessageLog.logMessage(f"[DEBUG] layer.isValid(): {self.layer.isValid() if self.layer else 'None'}", "GEO-search-plugin", 0)
-            QgsMessageLog.logMessage(f"[DEBUG] layer.name(): {self.layer.name() if self.layer else 'None'}", "GEO-search-plugin", 0)
-            QgsMessageLog.logMessage(f"[DEBUG] layer.featureCount(): {self.layer.featureCount() if self.layer else 'None'}", "GEO-search-plugin", 0)
-            
-            if not self.layer or not self.layer.isValid():
-                QgsMessageLog.logMessage("[ERROR] Layer is None or invalid!", "GEO-search-plugin", 0)
+            # 全フィールド検索: 文字列フィールドを連結して LIKE 検索を行う
+            # 最小限のログのみ出力する（通常はサイレント）
+            fields = self.layer.fields() if self.layer and self.layer.isValid() else None
+            if not self.layer or not self.layer.isValid() or fields is None:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("[ERROR] Layer is None or invalid for all-field search", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
                 return []
-            
-            fields = self.layer.fields()
-            QgsMessageLog.logMessage(f"[DEBUG] fields object: {fields}", "GEO-search-plugin", 0)
-            QgsMessageLog.logMessage(f"[DEBUG] fields.count(): {fields.count()}", "GEO-search-plugin", 0)
-            
-            search_fields = []
-            field_types = []
-            field_aliases = []
-            for i, field in enumerate(fields):
-                field_name = field.name()
-                field_type = field.typeName()
-                field_alias = field.alias() or field_name  # 別名がない場合は実名を使用
-                search_fields.append(field_name)  # 実フィールド名を使用
-                field_types.append(f"{field_name}:{field_type}")
-                field_aliases.append(f"{field_name}(alias:{field_alias})")
-                QgsMessageLog.logMessage(f"[DEBUG] field[{i}]: name='{field_name}', type='{field_type}', alias='{field_alias}'", "GEO-search-plugin", 0)
-            
-            QgsMessageLog.logMessage(f"search_fields: {search_fields}", "GEO-search-plugin", 0)
-            QgsMessageLog.logMessage(f"search_fields (name:type): {field_types}", "GEO-search-plugin", 0)
-            QgsMessageLog.logMessage(f"search_fields (name:alias): {field_aliases}", "GEO-search-plugin", 0)
 
-            # 全文検索アプローチ: 文字列フィールドのみを連結して検索
-            string_fields = []
-            for field in fields:
-                if field.type() == 10:  # String type (QVariant::String = 10)
-                    string_fields.append(field.name())
-            
-            QgsMessageLog.logMessage(f"[DEBUG] String fields for full-text search: {string_fields}", "GEO-search-plugin", 0)
-            
-            if string_fields:
-                # CONCATを使用して文字列フィールドを連結し、一括検索
-                concat_fields = " || ' ' || ".join([f'COALESCE("{field}", \'\')' for field in string_fields])
-                full_text_expr = f'({concat_fields}) LIKE \'%{all_value}%\''
-                QgsMessageLog.logMessage(f"[DEBUG] Full-text search expression: {full_text_expr}", "GEO-search-plugin", 0)
-                
-                expression = QgsExpression(full_text_expr)
-                
-                # 式の有効性をチェック
-                if expression.hasEvalError():
-                    QgsMessageLog.logMessage(f"[ERROR] Expression error: {expression.evalErrorString()}", "GEO-search-plugin", 0)
-                    return []
-                
-                request = QgsFeatureRequest(expression)
-                if limit:
-                    request.setLimit(limit)
-                
-                features = list(layer.getFeatures(request))
-                QgsMessageLog.logMessage(f"[ALL RESULT] Full-text search found {len(features)} features", "GEO-search-plugin", 0)
-                
-                return features
-            else:
-                QgsMessageLog.logMessage("[WARNING] No string fields found for full-text search!", "GEO-search-plugin", 0)
+            # collect string fields only
+            string_fields = [f.name() for f in fields if f.type() == 10]
+            if not string_fields:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("[INFO] No string fields for full-text search on layer", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
                 return []
+
+            concat_fields = " || ' ' || ".join([f'COALESCE("{field}", \'\')' for field in string_fields])
+            full_text_expr = f'({concat_fields}) LIKE \'%{all_value}%\''
+            expression = QgsExpression(full_text_expr)
+            if expression.hasEvalError():
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"[ERROR] Expression error in full-text search: {expression.evalErrorString()}", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
+                return []
+
+            request = QgsFeatureRequest(expression)
+            if limit:
+                request.setLimit(limit)
+            features = list(layer.getFeatures(request))
+            return features
         else:
-            # --- 通常検索（個別フィールド検索）実行箇所 ---
-            QgsMessageLog.logMessage("[INFO] Normal field search is executed.", "GEO-search-plugin", 0)
-            QgsMessageLog.logMessage(f"[DEBUG] self.fields: {self.fields}", "GEO-search-plugin", 0)
-            
+            # 通常検索（個別フィールド検索）: ログは最小限に留める
             for field, search_widget in zip(self.fields, self.widget.search_widgets):
                 if field.get("all"):
                     continue
                 field_name = field.get("Field") or field.get("ViewName")
                 value = search_widget.text()
-                QgsMessageLog.logMessage(f"[DEBUG] field config: {field}, field_name: '{field_name}', value: '{value}'", "GEO-search-plugin", 0)
-                
                 if not value:
                     continue
-                    
-                # フィールド名の存在確認
+
+                # フィールド名の存在確認（見つからなければ別名を試す）
                 if self.layer and self.layer.fields().indexFromName(field_name) == -1:
-                    QgsMessageLog.logMessage(f"[WARNING] Field '{field_name}' not found in layer fields!", "GEO-search-plugin", 0)
-                    # 別名での検索も試行
                     for layer_field in self.layer.fields():
                         if layer_field.alias() == field_name:
-                            field_name = layer_field.name()  # 実フィールド名に変換
-                            QgsMessageLog.logMessage(f"[INFO] Found field by alias: '{field.get('Field')}' -> '{field_name}'", "GEO-search-plugin", 0)
+                            field_name = layer_field.name()
                             break
-                
-                expres_list.append(
-                    '"{field}" LIKE \'%{value}%\''.format(field=field_name, value=value)
-                )
-                QgsMessageLog.logMessage(f"[DEBUG] Added expression: \"{field_name}\" LIKE '%{value}%'", "GEO-search-plugin", 0)
-            
-            expression_str = self.andor.join(expres_list)
-            QgsMessageLog.logMessage(f"[DEBUG] Final expression: {expression_str}", "GEO-search-plugin", 0)
-            expression = QgsExpression(expression_str)
-        request = QgsFeatureRequest(expression)
-        if limit:
-            request.setLimit(limit)
-        
-        # 検索結果の詳細ログ
-        features = list(layer.getFeatures(request))
-        QgsMessageLog.logMessage(f"[RESULT] Found {len(features)} features", "GEO-search-plugin", 0)
-        
-        # 最初の数件の詳細を出力（デバッグ用）
-        for i, feature in enumerate(features[:3]):  # 最初の3件のみ
-            attrs = {}
-            for field in layer.fields():
-                field_name = field.name()
-                alias = field.alias() or field_name
-                value = feature[field_name]
-                attrs[f"{field_name}({alias})"] = str(value)
-            QgsMessageLog.logMessage(f"[RESULT] Feature {i+1}: {attrs}", "GEO-search-plugin", 0)
-        
-        return features
+
+                expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=value))
+                expression_str = self.andor.join(expres_list)
+                expression = QgsExpression(expression_str)
+                request = QgsFeatureRequest(expression)
+                if limit:
+                    request.setLimit(limit)
+
+                # execute and return results (silent in normal operation)
+                features = list(layer.getFeatures(request))
+                return features
 
     def show_features(self):
         """表示レイヤ用の検索処理: タイトルが「表示レイヤ」の場合、現在表示中のベクタレイヤを順に検索して集約表示する"""
@@ -572,24 +538,53 @@ class SearchTextFeature(SearchFeature):
             layers = self.get_visible_vector_layers()
         else:
             layers = self.get_all_vector_layers()
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"show_features: target layer items count={len(layers)}", "GEO-search-plugin", 0)
+        except Exception:
+            pass
         all_features = []
         all_fields = []
-        for layer in layers:
-            # 一時的に現在のレイヤ設定を退避してlayerを使って検索
+        for item in layers:
+            # item may be either (node, layer) when coming from get_visible_vector_layers
+            # or a bare layer when coming from get_all_vector_layers. Normalize.
+            node = None
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                node, layer = item[0], item[1]
+            else:
+                layer = item
+                node = None
+
             original_layer_setting = getattr(self, '_layer_setting', None)
             try:
-                # monkey-patch: self.layer プロパティは load_layer を使うが直接置き換えが簡単
-                # perform per-layer search using the existing search_feature logic
-                # We'll call a helper that accepts a concrete layer
+                try:
+                    from qgis.core import QgsMessageLog
+                    node_id = getattr(node, 'layerId', lambda: None)() if node is not None else None
+                    node_name = None
+                    if node is not None:
+                        try:
+                            name_attr = getattr(node, 'name', None)
+                            node_name = name_attr() if callable(name_attr) else name_attr
+                        except Exception:
+                            node_name = None
+                    QgsMessageLog.logMessage(f"show_features: searching node={node_name} node_id={node_id} layer={getattr(layer, 'name', lambda: None)()}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+
                 features = self._search_on_layer(layer)
             finally:
-                # restore
                 self._layer_setting = original_layer_setting
+
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"show_features: node={getattr(node, 'name', lambda: None)() if node is not None else 'None'} features_found={len(features)}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+
             if features:
-                # for display, we need fields for this layer; use layer.fields()
-                # attach layer reference to features via tuple (layer, feature)
+                # preserve node information so duplicates are treated separately
                 for f in features:
-                    all_features.append((layer, f))
+                    all_features.append((node, layer, f))
 
         # If no results, show empty
         if not all_features:
@@ -598,17 +593,43 @@ class SearchTextFeature(SearchFeature):
             return
 
         # Build per-layer lists for tabbed display
+        # group results per node (or per layer when node is None)
         layers_map = []
-        for layer, feature in all_features:
-            # find existing entry
-            entry = next((e for e in layers_map if e[0] == layer), None)
-            if entry is None:
-                layers_map.append([layer, [field for field in layer.fields()], [feature]])
-            else:
-                entry[2].append(feature)
+        for node, layer, feature in all_features:
+            # use node as primary key to distinguish duplicate nodes; fall back to layer
+            key = node if node is not None else layer
+            # compute a human-readable node path label for tab naming
+            label = None
+            if node is not None:
+                try:
+                    parts = []
+                    n = node
+                    while n is not None:
+                        name_attr = getattr(n, 'name', None)
+                        name = name_attr() if callable(name_attr) else name_attr
+                        if name:
+                            parts.insert(0, name)
+                        parent_attr = getattr(n, 'parent', None)
+                        n = parent_attr() if callable(parent_attr) else parent_attr
+                    if parts:
+                        label = "/".join(parts)
+                except Exception:
+                    label = None
+            if not label:
+                try:
+                    label = layer.name() if layer is not None else "Results"
+                except Exception:
+                    label = "Results"
 
-        # call new API to set per-layer tabs
-        self.result_dialog.set_features_by_layer([(e[0], e[1], e[2]) for e in layers_map])
+            entry = next((e for e in layers_map if e[0] == key), None)
+            if entry is None:
+                entry = [key, layer, label, [field for field in layer.fields()], [feature]]
+                layers_map.append(entry)
+            else:
+                entry[4].append(feature)
+
+        # call new API to set per-layer tabs; pass (label, layer) as the layer value
+        self.result_dialog.set_features_by_layer([((e[2], e[1]), e[3], e[4]) for e in layers_map])
         self.result_dialog.show()
 
     def _search_on_layer(self, layer):
@@ -638,19 +659,88 @@ class SearchTextFeature(SearchFeature):
             for field in layer.fields():
                 if field.type() == 10:
                     string_fields.append(field.name())
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_search_on_layer: all_field_search layer={getattr(layer, 'name', lambda: 'None')()} string_fields={string_fields}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
             if not string_fields:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"_search_on_layer: no string fields for layer={getattr(layer, 'name', lambda: 'None')()}", "GEO-search-plugin", 0)
+                    # log subsetString and a sample of attributes
+                    try:
+                        subset = getattr(layer, 'subsetString', lambda: None)()
+                        QgsMessageLog.logMessage(f"_search_on_layer: subsetString={subset}", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+                    # sample first few features
+                    try:
+                        sample = []
+                        for i, feat in enumerate(layer.getFeatures()):
+                            if i >= 3:
+                                break
+                            row = {f.name(): feat[f.name()] for f in layer.fields()}
+                            sample.append(row)
+                        QgsMessageLog.logMessage(f"_search_on_layer: sample_rows={sample}", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
                 return []
             concat_fields = " || ' ' || ".join([f'COALESCE("{field}", \'\')' for field in string_fields])
             full_text_expr = f'({concat_fields}) LIKE \'%{all_value}%\''
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_search_on_layer: full_text_expr={full_text_expr}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
             expression = QgsExpression(full_text_expr)
             if expression.hasEvalError():
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"_search_on_layer: expression error: {expression.evalErrorString()}", "GEO-search-plugin", 0)
+                    try:
+                        subset = getattr(layer, 'subsetString', lambda: None)()
+                        QgsMessageLog.logMessage(f"_search_on_layer: subsetString={subset}", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
                 return []
             request = QgsFeatureRequest(expression)
             features = list(layer.getFeatures(request))
+            if not features:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"_search_on_layer: full-text search returned 0 features for layer={getattr(layer, 'name', lambda: 'None')()}", "GEO-search-plugin", 0)
+                    try:
+                        subset = getattr(layer, 'subsetString', lambda: None)()
+                        QgsMessageLog.logMessage(f"_search_on_layer: subsetString={subset}", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+                    try:
+                        sample = []
+                        for i, feat in enumerate(layer.getFeatures()):
+                            if i >= 3:
+                                break
+                            row = {f.name(): feat[f.name()] for f in layer.fields()}
+                            sample.append(row)
+                        QgsMessageLog.logMessage(f"_search_on_layer: sample_rows={sample}", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             return features
 
         # normal field search
         expres_list = []
+        try:
+            from qgis.core import QgsMessageLog
+            field_names = [f.name() for f in layer.fields()]
+            QgsMessageLog.logMessage(f"_search_on_layer: normal search layer={getattr(layer, 'name', lambda: 'None')()} layer_fields={field_names}", "GEO-search-plugin", 0)
+        except Exception:
+            pass
         for field, search_widget in zip(self.fields, self.widget.search_widgets):
             if field.get("all"):
                 continue
@@ -667,11 +757,57 @@ class SearchTextFeature(SearchFeature):
             expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=value))
 
         if not expres_list:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_search_on_layer: no expressions to search for layer={getattr(layer, 'name', lambda: 'None')()}; fields requested={[field.get('Field') or field.get('ViewName') for field in self.fields]}", "GEO-search-plugin", 0)
+                try:
+                    subset = getattr(layer, 'subsetString', lambda: None)()
+                    QgsMessageLog.logMessage(f"_search_on_layer: subsetString={subset}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+                try:
+                    sample = []
+                    for i, feat in enumerate(layer.getFeatures()):
+                        if i >= 3:
+                            break
+                        row = {f.name(): feat[f.name()] for f in layer.fields()}
+                        sample.append(row)
+                    QgsMessageLog.logMessage(f"_search_on_layer: sample_rows={sample}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+            except Exception:
+                pass
             return []
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"_search_on_layer: expres_list={expres_list}", "GEO-search-plugin", 0)
+        except Exception:
+            pass
         expression_str = self.andor.join(expres_list)
         expression = QgsExpression(expression_str)
         request = QgsFeatureRequest(expression)
         features = list(layer.getFeatures(request))
+        if not features:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_search_on_layer: normal search returned 0 features for layer={getattr(layer, 'name', lambda: 'None')()}", "GEO-search-plugin", 0)
+                try:
+                    subset = getattr(layer, 'subsetString', lambda: None)()
+                    QgsMessageLog.logMessage(f"_search_on_layer: subsetString={subset}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+                try:
+                    sample = []
+                    for i, feat in enumerate(layer.getFeatures()):
+                        if i >= 3:
+                            break
+                        row = {f.name(): feat[f.name()] for f in layer.fields()}
+                        sample.append(row)
+                    QgsMessageLog.logMessage(f"_search_on_layer: sample_rows={sample}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+            except Exception:
+                pass
         return features
 
 
