@@ -1,5 +1,0 @@
-<RCC>
-    <qresource prefix="/plugins/GEO-search" >
-        <file>/icon/qgis-icon.png</file>
-    </qresource>
-</RCC>
