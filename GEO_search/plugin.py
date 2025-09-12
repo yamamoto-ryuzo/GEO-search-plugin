@@ -7,12 +7,16 @@ import json
 import os
 
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
+from qgis.PyQt.QtWidgets import QAction, QMessageBox
 from qgis.core import (
     QgsProject,
     QgsExpressionContextUtils,
 )
-from PyQt5.QtWidgets import QMessageBox
+"""QGIS プラグイン Qt 互換インポート
+
+PyQt5 を直接参照していた箇所を qgis.PyQt 経由に統一し、
+将来の Qt6 / PyQt6 互換 (QGIS の shim) に備える。
+"""
 
 from .constants import OTHER_GROUP_NAME
 from .searchfeature import (
