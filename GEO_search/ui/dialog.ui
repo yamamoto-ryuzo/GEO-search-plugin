@@ -34,6 +34,13 @@
      </property>
     </widget>
    </item>
+    <item row="1" column="3">
+     <widget class="QPushButton" name="addLayerButton">
+      <property name="text">
+        <string>現在のレイヤを追加</string>
+      </property>
+     </widget>
+    </item>
    <item row="1" column="0">
     <widget class="QPushButton" name="questionButton">
      <property name="sizePolicy">

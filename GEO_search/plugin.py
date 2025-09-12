@@ -103,15 +103,28 @@ class plugin(object):
         # 変数名 GEO-search-plugin
         ProjectInstance = QgsProject.instance()
         # テキストとして読込
-        if (
-            QgsExpressionContextUtils.projectScope(ProjectInstance).variable(
+        try:
+            ctx_var = QgsExpressionContextUtils.projectScope(ProjectInstance).variable(
                 "GEO-search-plugin"
             )
-            is not None
-        ):
-            input_json_variable = QgsExpressionContextUtils.projectScope(
-                ProjectInstance
-            ).variable("GEO-search-plugin")
+        except Exception:
+            ctx_var = None
+
+        if ctx_var is not None:
+            input_json_variable = ctx_var
+        else:
+            # fallback: try readEntry / custom property
+            try:
+                ok, val = ProjectInstance.readEntry('GEO-search-plugin', 'value')
+                if ok:
+                    input_json_variable = val
+            except Exception:
+                try:
+                    pv = ProjectInstance.customProperty('GEO-search-plugin')
+                    if pv is not None:
+                        input_json_variable = pv
+                except Exception:
+                    pass
 
         # ファイルと変数を結合
         if input_json_file != "":
@@ -139,7 +152,7 @@ class plugin(object):
             # メッセージ表示
             # QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
 
-            self.dialog = SearchDialog(settings, parent=self.iface.mainWindow())
+            self.dialog = SearchDialog(settings, parent=self.iface.mainWindow(), iface=self.iface)
             widgets = self.dialog.get_widgets()
             self._search_features = []
             # ここでおこられてる

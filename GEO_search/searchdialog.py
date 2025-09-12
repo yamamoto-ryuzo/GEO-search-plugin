@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import json
 from collections import OrderedDict
 
 from qgis.PyQt.QtWidgets import QDialog, QTabWidget
@@ -18,12 +19,18 @@ UI_FILE = "dialog.ui"
 
 
 class SearchDialog(QDialog):
-    def __init__(self, setting, parent=None):
+    def __init__(self, setting, parent=None, iface=None):
         super(SearchDialog, self).__init__(parent=parent)
+        self.iface = iface
         directory = os.path.join(os.path.dirname(__file__), "ui")
         ui_file = os.path.join(directory, UI_FILE)
         uic.loadUi(ui_file, self)
         self.init_gui(setting)
+        # Connect add layer button if present
+        try:
+            self.addLayerButton.clicked.connect(self.add_current_layer_to_project_variable)
+        except Exception:
+            pass
 
     def init_gui(self, setting):
         self.tab_groups = self.create_tab_groups(setting["SearchTabs"])
@@ -73,3 +80,42 @@ class SearchDialog(QDialog):
                 for i in range(group_widget.count())
             ]
         return [self.tabWidget.widget(i) for i in range(self.tabWidget.count())]
+
+    def add_current_layer_to_project_variable(self):
+        try:
+            from qgis.core import QgsProject, QgsExpressionContextUtils
+            project = QgsProject.instance()
+            current_layer = self.parent().iface.activeLayer() if hasattr(self.parent(), 'iface') else None
+            if current_layer is None:
+                return
+            layer_name = current_layer.name()
+
+            # read existing variable
+            proj_scope = QgsExpressionContextUtils.projectScope(project)
+            existing = proj_scope.variable("GEO-search-plugin")
+            # existing is expected to be a JSON fragment (e.g., array element), try to merge
+            try:
+                if existing is None or existing == "":
+                    new_value = json.dumps([{"Title": f"{layer_name}", "Layer": {"LayerType": "Name", "Name": layer_name}}])
+                else:
+                    # try to parse existing as JSON array; if not array, wrap
+                    parsed = json.loads(existing)
+                    if isinstance(parsed, list):
+                        parsed.append({"Title": f"{layer_name}", "Layer": {"LayerType": "Name", "Name": layer_name}})
+                        new_value = json.dumps(parsed)
+                    else:
+                        new_value = json.dumps([parsed, {"Title": f"{layer_name}", "Layer": {"LayerType": "Name", "Name": layer_name}}])
+            except Exception:
+                # fallback: set as single-item array string
+                new_value = json.dumps([{"Title": f"{layer_name}", "Layer": {"LayerType": "Name", "Name": layer_name}}])
+
+            # write back into project variables: try writeEntry, then setCustomProperty
+            try:
+                project.writeEntry('GEO-search-plugin', 'value', new_value)
+            except Exception:
+                try:
+                    project.setCustomProperty("GEO-search-plugin", new_value)
+                except Exception:
+                    pass
+        except Exception:
+            pass
