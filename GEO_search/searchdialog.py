@@ -29,6 +29,11 @@ class SearchDialog(QDialog):
         # Connect add layer button if present
         try:
             self.addLayerButton.clicked.connect(self.add_current_layer_to_project_variable)
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("addLayerButton connected", "GEO-search-plugin", 0)
+            except Exception:
+                print("addLayerButton connected")
         except Exception:
             pass
 
@@ -83,12 +88,61 @@ class SearchDialog(QDialog):
 
     def add_current_layer_to_project_variable(self):
         try:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("add_current_layer_to_project_variable invoked", "GEO-search-plugin", 0)
+            except Exception:
+                print("add_current_layer_to_project_variable invoked")
             from qgis.core import QgsProject, QgsExpressionContextUtils
             project = QgsProject.instance()
-            current_layer = self.parent().iface.activeLayer() if hasattr(self.parent(), 'iface') else None
+            # Resolve iface: prefer dialog's iface, fallback to parent().iface
+            iface = getattr(self, 'iface', None)
+            if iface is None and hasattr(self.parent(), 'iface'):
+                iface = self.parent().iface
+
+            current_layer = None
+            try:
+                if iface is not None:
+                    current_layer = iface.activeLayer()
+            except Exception:
+                current_layer = None
+
             if current_layer is None:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("add_current_layer: no active layer found", "GEO-search-plugin", 1)
+                except Exception:
+                    print("add_current_layer: no active layer found")
                 return
-            layer_name = current_layer.name()
+
+            layer_name = current_layer.name() if hasattr(current_layer, 'name') else str(current_layer)
+
+            # Build a standard JSON structure for searching this layer
+            standard_json = {
+                "Title": layer_name,
+                "Layer": {
+                    "LayerType": "Name",
+                    "Name": layer_name
+                },
+                # default search options
+                "Search": {
+                    "Fields": [],
+                    "FullText": False,
+                    "CaseSensitive": False,
+                    "MatchType": "contains"
+                }
+            }
+
+            # Log the JSON to QGIS message log for inspection
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"Add current layer JSON: {json.dumps(standard_json, ensure_ascii=False)}", "GEO-search-plugin", 0)
+            except Exception:
+                # best-effort: if QgsMessageLog not available, print
+                try:
+                    print(json.dumps(standard_json, ensure_ascii=False))
+                except Exception:
+                    pass
 
             # read existing variable
             proj_scope = QgsExpressionContextUtils.projectScope(project)
@@ -96,18 +150,18 @@ class SearchDialog(QDialog):
             # existing is expected to be a JSON fragment (e.g., array element), try to merge
             try:
                 if existing is None or existing == "":
-                    new_value = json.dumps([{"Title": f"{layer_name}", "Layer": {"LayerType": "Name", "Name": layer_name}}])
+                    new_value = json.dumps([standard_json], ensure_ascii=False)
                 else:
                     # try to parse existing as JSON array; if not array, wrap
                     parsed = json.loads(existing)
                     if isinstance(parsed, list):
-                        parsed.append({"Title": f"{layer_name}", "Layer": {"LayerType": "Name", "Name": layer_name}})
-                        new_value = json.dumps(parsed)
+                        parsed.append(standard_json)
+                        new_value = json.dumps(parsed, ensure_ascii=False)
                     else:
-                        new_value = json.dumps([parsed, {"Title": f"{layer_name}", "Layer": {"LayerType": "Name", "Name": layer_name}}])
+                        new_value = json.dumps([parsed, standard_json], ensure_ascii=False)
             except Exception:
                 # fallback: set as single-item array string
-                new_value = json.dumps([{"Title": f"{layer_name}", "Layer": {"LayerType": "Name", "Name": layer_name}}])
+                new_value = json.dumps([standard_json], ensure_ascii=False)
 
             # write back into project variables: try writeEntry, then setCustomProperty
             try:
@@ -117,5 +171,9 @@ class SearchDialog(QDialog):
                     project.setCustomProperty("GEO-search-plugin", new_value)
                 except Exception:
                     pass
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"add_current_layer_to_project_variable error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"add_current_layer_to_project_variable error: {e}")
