@@ -27,34 +27,34 @@
      </property>
     </spacer>
    </item>
-   <item row="1" column="2">
-    <widget class="QPushButton" name="searchButton">
-     <property name="text">
-      <string>検索</string>
-     </property>
-    </widget>
-   </item>
-    <item row="1" column="3">
+    <item row="1" column="2">
      <widget class="QPushButton" name="addLayerButton">
       <property name="text">
         <string>現在のレイヤを追加</string>
       </property>
      </widget>
     </item>
-    <item row="1" column="4">
+    <item row="1" column="3">
      <widget class="QPushButton" name="removeTabButton">
       <property name="text">
         <string>選択したタブを削除</string>
       </property>
      </widget>
     </item>
-    <item row="1" column="5">
+    <item row="1" column="4">
      <widget class="QPushButton" name="configButton">
       <property name="text">
         <string>設定編集</string>
       </property>
      </widget>
     </item>
+   <item row="1" column="5">
+    <widget class="QPushButton" name="searchButton">
+     <property name="text">
+      <string>検索</string>
+     </property>
+    </widget>
+   </item>
    <item row="1" column="0">
     <widget class="QPushButton" name="questionButton">
      <property name="sizePolicy">
@@ -77,8 +77,20 @@
      </property>
     </widget>
    </item>
-   <item row="0" column="0" colspan="3">
+   <item row="0" column="0" colspan="6">
     <widget class="QTabWidget" name="tabWidget">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>1</horstretch>
+       <verstretch>1</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="minimumSize">
+      <size>
+       <width>400</width>
+       <height>150</height>
+      </size>
+     </property>
      <property name="currentIndex">
       <number>-1</number>
      </property>

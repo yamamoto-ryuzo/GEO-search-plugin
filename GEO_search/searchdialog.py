@@ -4,9 +4,11 @@ import json
 from collections import OrderedDict
 
 from qgis.PyQt.QtWidgets import QDialog, QTabWidget, QTextEdit, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox
+from qgis.PyQt.QtWidgets import QLabel, QGridLayout, QFrame, QCheckBox, QScrollArea, QWidget
 from qgis.PyQt.QtCore import Qt
 
 from qgis.PyQt import uic
+from qgis.core import QgsProject
 
 from .widget.searchwidget import (
     SearchTextWidget,
@@ -644,13 +646,12 @@ class SearchDialog(QDialog):
             else:
                 editable_fields["SearchField"] = {}
                 
-            # 表示フィールド (ViewFields)
-            if "ViewFields" in tab_config:
-                editable_fields["ViewFields"] = tab_config["ViewFields"]
-            else:
-                editable_fields["ViewFields"] = []
-                
-            # その他の読み取り専用フィールド
+                # 表示フィールド (ViewFields) - 直接編集しない
+                # ViewFields は別のダイアログで編集するため、一旦保存しておく
+                if "ViewFields" in tab_config:
+                    tab_config["_ViewFields"] = tab_config["ViewFields"]  # 一時的なキーに保存
+                else:
+                    tab_config["_ViewFields"] = []            # その他の読み取り専用フィールド
             for key, value in tab_config.items():
                 if key not in ["group", "Title", "SearchField", "ViewFields"]:
                     readonly_fields[key] = value
@@ -661,6 +662,10 @@ class SearchDialog(QDialog):
             # 編集可能フィールドの設定
             row = 0
             for field_name, field_value in editable_fields.items():
+                # ViewFields は特別処理なのでスキップ（別のボタンで編集）
+                if field_name == "ViewFields":
+                    continue
+                    
                 # ラベル
                 label = QLabel(f"{field_name}:", edit_dialog)
                 label.setStyleSheet("font-weight: bold;")
@@ -679,6 +684,58 @@ class SearchDialog(QDialog):
                 editors[field_name] = editor
                 
                 row += 1
+                
+            # ViewFields 用のボタンを追加
+            view_fields_label = QLabel("ViewFields:", edit_dialog)
+            view_fields_label.setStyleSheet("font-weight: bold;")
+            grid_layout.addWidget(view_fields_label, row, 0)
+            
+            view_fields_layout = QHBoxLayout()
+            
+            # 現在の表示フィールドを表示
+            view_fields_text = QTextEdit(edit_dialog)
+            view_fields_text.setFont(self.get_monospace_font())
+            view_fields_text.setReadOnly(True)
+            view_fields_text.setMinimumHeight(80)
+            
+            # フィールド情報を取得
+            view_fields_value = []
+            if "_ViewFields" in tab_config and isinstance(tab_config["_ViewFields"], list):
+                view_fields_value = tab_config["_ViewFields"]
+            
+            # テキスト表示
+            json_str = json.dumps(view_fields_value, indent=2, ensure_ascii=False)
+            view_fields_text.setText(json_str)
+            
+            view_fields_layout.addWidget(view_fields_text)
+            
+            # 編集ボタン
+            view_fields_button = QPushButton("フィールド選択", edit_dialog)
+            
+            # レイヤー名を取得
+            layer_name = ""
+            if "Layer" in tab_config and "Name" in tab_config["Layer"]:
+                layer_name = tab_config["Layer"]["Name"]
+            
+            # ボタンクリック時の処理
+            def on_view_fields_edited(new_fields):
+                view_fields_text.setText(json.dumps(new_fields, indent=2, ensure_ascii=False))
+                tab_config["_ViewFields"] = new_fields  # 一時的な保存
+            
+            view_fields_button.clicked.connect(
+                lambda: self.edit_view_fields(
+                    view_fields_value, 
+                    layer_name, 
+                    edit_dialog, 
+                    on_view_fields_edited
+                )
+            )
+            
+            view_fields_button.setMinimumWidth(100)
+            view_fields_layout.addWidget(view_fields_button)
+            
+            grid_layout.addLayout(view_fields_layout, row, 1)
+            row += 1
             
             # 読み取り専用フィールドがあれば、セクション区切りを追加
             if readonly_fields:
@@ -761,6 +818,119 @@ class SearchDialog(QDialog):
             return font
         except Exception:
             return None
+    
+    def edit_view_fields(self, current_fields, layer_name, dialog, callback):
+        """ViewFieldsを編集するためのダイアログを表示する"""
+        try:
+            # レイヤーを取得
+            layer = None
+            project = QgsProject.instance()
+            
+            # レイヤー名でレイヤーを検索
+            for lyr in project.mapLayers().values():
+                if lyr.name() == layer_name:
+                    layer = lyr
+                    break
+            
+            # レイヤーの属性を取得
+            available_fields = []
+            if layer:
+                for field in layer.fields():
+                    available_fields.append(field.name())
+            else:
+                # レイヤーが見つからない場合、現在のフィールドを使用
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"レイヤー '{layer_name}' が見つかりません。現在のフィールドを使用します。", "GEO-search-plugin", 1)
+                except Exception:
+                    print(f"レイヤー '{layer_name}' が見つかりません。現在のフィールドを使用します。")
+                
+                # 現在のフィールドが空でない場合は使用
+                if isinstance(current_fields, list) and current_fields:
+                    available_fields = [field for field in current_fields]
+            
+            # ダイアログを作成
+            fields_dialog = QDialog(dialog)
+            fields_dialog.setWindowTitle(f"表示フィールドの選択: {layer_name}")
+            fields_dialog.setMinimumSize(400, 300)
+            
+            layout = QVBoxLayout(fields_dialog)
+            
+            # 説明ラベル
+            info_label = QLabel("表示するフィールドを選択してください:", fields_dialog)
+            layout.addWidget(info_label)
+            
+            # スクロールエリア
+            scroll_area = QScrollArea(fields_dialog)
+            scroll_area.setWidgetResizable(True)
+            scroll_content = QWidget(scroll_area)
+            scroll_layout = QVBoxLayout(scroll_content)
+            
+            # チェックボックス
+            checkboxes = {}
+            for field_name in available_fields:
+                checkbox = QCheckBox(field_name, scroll_content)
+                # 現在選択されているフィールドはチェックを入れる
+                if isinstance(current_fields, list) and field_name in current_fields:
+                    checkbox.setChecked(True)
+                scroll_layout.addWidget(checkbox)
+                checkboxes[field_name] = checkbox
+            
+            # 空きスペースを追加
+            scroll_layout.addStretch(1)
+            
+            scroll_content.setLayout(scroll_layout)
+            scroll_area.setWidget(scroll_content)
+            layout.addWidget(scroll_area)
+            
+            # ボタン配置
+            button_layout = QHBoxLayout()
+            
+            # 保存ボタン
+            save_button = QPushButton("保存", fields_dialog)
+            save_button.clicked.connect(lambda: self._save_view_fields(checkboxes, fields_dialog, callback))
+            button_layout.addWidget(save_button)
+            
+            # キャンセルボタン
+            cancel_button = QPushButton("キャンセル", fields_dialog)
+            cancel_button.clicked.connect(fields_dialog.reject)
+            button_layout.addWidget(cancel_button)
+            
+            layout.addLayout(button_layout)
+            
+            # ダイアログを表示
+            fields_dialog.exec_()
+            
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"edit_view_fields error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"edit_view_fields error: {e}")
+            QMessageBox.warning(dialog, "エラー", f"表示フィールドの編集中にエラーが発生しました:\n{str(e)}")
+    
+    def _save_view_fields(self, checkboxes, dialog, callback):
+        """チェックされたフィールドを保存する"""
+        try:
+            # チェックされているフィールドのリストを作成
+            selected_fields = []
+            for field_name, checkbox in checkboxes.items():
+                if checkbox.isChecked():
+                    selected_fields.append(field_name)
+            
+            # コールバック関数を呼び出して結果を返す
+            callback(selected_fields)
+            
+            # ダイアログを閉じる
+            dialog.accept()
+            
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_save_view_fields error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"_save_view_fields error: {e}")
+            QMessageBox.warning(dialog, "エラー", f"表示フィールドの保存中にエラーが発生しました:\n{str(e)}")
                 
     def save_tab_config_by_fields(self, editors, readonly_fields, dialog, all_configs, tab_index, tab_title):
         """各フィールドエディタから値を取得してタブ設定を保存"""
@@ -794,6 +964,10 @@ class SearchDialog(QDialog):
                 QMessageBox.information(self, "タイトルの調整", 
                     f"タイトルは自動的に '{tab_title}' に設定されます。タブ名を変更するには、新しいタブを作成してください。")
                 tab_config["Title"] = tab_title
+                
+            # _ViewFieldsからViewFieldsに値を移し替え
+            if "_ViewFields" in readonly_fields:
+                tab_config["ViewFields"] = readonly_fields["_ViewFields"]
             
             # 設定を保存
             self._update_config_and_save(tab_config, dialog, all_configs, tab_index)
