@@ -3,7 +3,8 @@ import os
 import json
 from collections import OrderedDict
 
-from qgis.PyQt.QtWidgets import QDialog, QTabWidget
+from qgis.PyQt.QtWidgets import QDialog, QTabWidget, QTextEdit, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox
+from qgis.PyQt.QtCore import Qt
 
 from qgis.PyQt import uic
 
@@ -46,6 +47,17 @@ class SearchDialog(QDialog):
                 QgsMessageLog.logMessage("removeTabButton connected", "GEO-search-plugin", 0)
             except Exception:
                 print("removeTabButton connected")
+        except Exception:
+            pass
+            
+        # Connect config button if present
+        try:
+            self.configButton.clicked.connect(self.edit_project_variable)
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("configButton connected", "GEO-search-plugin", 0)
+            except Exception:
+                print("configButton connected")
         except Exception:
             pass
 
@@ -484,3 +496,159 @@ class SearchDialog(QDialog):
                 QgsMessageLog.logMessage(f"remove_current_tab_from_project_variable error: {e}", "GEO-search-plugin", 1)
             except Exception:
                 print(f"remove_current_tab_from_project_variable error: {e}")
+                
+    def edit_project_variable(self):
+        """プロジェクト変数を編集するためのダイアログを表示します"""
+        try:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("edit_project_variable invoked", "GEO-search-plugin", 0)
+            except Exception:
+                print("edit_project_variable invoked")
+                
+            # プロジェクト変数を取得
+            from qgis.core import QgsProject, QgsExpressionContextUtils
+            project = QgsProject.instance()
+            proj_scope = QgsExpressionContextUtils.projectScope(project)
+            existing = proj_scope.variable("GEO-search-plugin")
+            
+            if existing is None or existing == "":
+                existing = "[]"  # 空の配列
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("No existing project variable, creating empty array", "GEO-search-plugin", 0)
+                except Exception:
+                    print("No existing project variable, creating empty array")
+            
+            # 編集ダイアログを作成
+            edit_dialog = QDialog(self)
+            edit_dialog.setWindowTitle("プロジェクト変数の編集")
+            edit_dialog.setMinimumSize(700, 500)
+            
+            layout = QVBoxLayout(edit_dialog)
+            
+            # テキストエディタ
+            text_edit = QTextEdit(edit_dialog)
+            text_edit.setFont(self.get_monospace_font())
+            
+            # 整形されたJSONを表示
+            try:
+                parsed = json.loads(existing)
+                formatted_json = json.dumps(parsed, indent=2, ensure_ascii=False)
+                text_edit.setText(formatted_json)
+            except Exception as e:
+                text_edit.setText(existing)
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Error formatting JSON: {e}", "GEO-search-plugin", 1)
+                except Exception:
+                    print(f"Error formatting JSON: {e}")
+            
+            layout.addWidget(text_edit)
+            
+            # ボタン配置
+            button_layout = QHBoxLayout()
+            
+            # 保存ボタン
+            save_button = QPushButton("保存", edit_dialog)
+            save_button.clicked.connect(lambda: self.save_project_variable(text_edit.toPlainText(), edit_dialog))
+            button_layout.addWidget(save_button)
+            
+            # キャンセルボタン
+            cancel_button = QPushButton("キャンセル", edit_dialog)
+            cancel_button.clicked.connect(edit_dialog.reject)
+            button_layout.addWidget(cancel_button)
+            
+            layout.addLayout(button_layout)
+            
+            # ダイアログを表示
+            edit_dialog.exec_()
+            
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"edit_project_variable error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"edit_project_variable error: {e}")
+    
+    def get_monospace_font(self):
+        """等幅フォントを取得"""
+        try:
+            from qgis.PyQt.QtGui import QFont
+            font = QFont("Courier New")
+            font.setStyleHint(QFont.Monospace)
+            font.setPointSize(10)
+            return font
+        except Exception:
+            return None
+                
+    def save_project_variable(self, text, dialog):
+        """プロジェクト変数を保存"""
+        try:
+            # JSONとして解析できるかチェック
+            try:
+                json_data = json.loads(text)
+                # 配列でなければ配列に変換
+                if not isinstance(json_data, list):
+                    json_data = [json_data]
+            except Exception as e:
+                QMessageBox.warning(self, "JSONエラー", f"入力されたテキストはJSONとして有効ではありません:\n{str(e)}")
+                return
+                
+            # プロジェクト変数を更新
+            from qgis.core import QgsProject, QgsExpressionContextUtils
+            project = QgsProject.instance()
+            
+            # JSONを文字列に変換
+            new_value = json.dumps(json_data, ensure_ascii=False)
+            
+            # 変数を更新 (複数の方法で試行)
+            # Method 1: setProjectVariable
+            try:
+                QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
+                read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Updated project variable: {str(read_back)}", "GEO-search-plugin", 0)
+                except Exception:
+                    print(f"Updated project variable: {str(read_back)}")
+            except Exception as err:
+                print(f"setProjectVariable failed: {err}")
+            
+            # Method 2: writeEntry
+            try:
+                project.writeEntry('GEO-search-plugin', 'value', new_value)
+                ok, val = project.readEntry('GEO-search-plugin', 'value')
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Wrote via writeEntry ok={ok} val={val}", "GEO-search-plugin", 0)
+                except Exception:
+                    print(f"Wrote via writeEntry ok={ok} val={val}")
+            except Exception as err:
+                print(f"writeEntry failed: {err}")
+            
+            # Method 3: setCustomProperty
+            try:
+                project.setCustomProperty('GEO-search-plugin', new_value)
+                pv = project.customProperty('GEO-search-plugin')
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Set customProperty: {str(pv)}", "GEO-search-plugin", 0)
+                except Exception:
+                    print(f"Set customProperty: {str(pv)}")
+            except Exception as err:
+                print(f"setCustomProperty failed: {err}")
+                
+            # ダイアログを閉じる
+            dialog.accept()
+            
+            # UI再読み込み
+            self.reload_ui("after editing project variable")
+            
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"save_project_variable error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"save_project_variable error: {e}")
+            QMessageBox.warning(self, "エラー", f"プロジェクト変数の保存中にエラーが発生しました:\n{str(e)}")
