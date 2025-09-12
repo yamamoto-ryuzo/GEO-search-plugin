@@ -134,8 +134,21 @@ class plugin(object):
             # QMessageBox.information(None, "設定ファイルの読込", input_json_file , QMessageBox.Yes)
             if input_json_variable != "":
                 input_json += ","
-        if input_json_variable is not None:
-            input_json += input_json_variable
+        if input_json_variable is not None and input_json_variable != "":
+            # If the stored project variable is a JSON array or object, expand it
+            try:
+                parsed_var = json.loads(input_json_variable)
+                if isinstance(parsed_var, list):
+                    # join elements without surrounding array brackets to avoid nested arrays
+                    elems = ",".join(json.dumps(el, ensure_ascii=False) for el in parsed_var)
+                    input_json += elems
+                elif isinstance(parsed_var, dict):
+                    input_json += json.dumps(parsed_var, ensure_ascii=False)
+                else:
+                    input_json += json.dumps(parsed_var, ensure_ascii=False)
+            except Exception:
+                # fallback: use raw string
+                input_json += input_json_variable
             flag = 1
             # メッセージ表示
             # QMessageBox.information(None, "設定変数の読込", input_json_variable , QMessageBox.Yes)

@@ -32,7 +32,7 @@ class SearchFeature(object):
         self.setting = setting
         self.fields = setting.get("SearchFields", [setting.get("SearchField")])
         self.title = setting["Title"]
-        self.view_fields = setting["ViewFields"]
+        self.view_fields = setting.get("ViewFields", [])
         self.sample_fields = setting.get("SampleFields", [])
         self._layer_setting = setting.get("Layer")
         if self._layer_setting and isinstance(self._layer_setting, dict):
@@ -454,6 +454,9 @@ class SearchTextFeature(SearchFeature):
         # Check if the "All" field is enabled and has input
         from qgis.core import QgsMessageLog
         for field, search_widget in zip(self.fields, self.widget.search_widgets):
+            # skip invalid field entries
+            if not isinstance(field, dict):
+                continue
             # 空dict（Allフィールド）のみ all_field_search を実行
             if field == {}:
                 all_value = search_widget.text()
@@ -502,10 +505,17 @@ class SearchTextFeature(SearchFeature):
         else:
             # 通常検索（個別フィールド検索）: ログは最小限に留める
             for field, search_widget in zip(self.fields, self.widget.search_widgets):
-                if field.get("all"):
+                try:
+                    # skip invalid field entries
+                    if not isinstance(field, dict):
+                        continue
+                    if field.get("all"):
+                        continue
+                    field_name = field.get("Field") or field.get("ViewName")
+                    value = search_widget.text()
+                except Exception:
+                    # If unexpected structure, skip this field
                     continue
-                field_name = field.get("Field") or field.get("ViewName")
-                value = search_widget.text()
                 if not value:
                     continue
 
@@ -526,6 +536,9 @@ class SearchTextFeature(SearchFeature):
                 # execute and return results (silent in normal operation)
                 features = list(layer.getFeatures(request))
                 return features
+
+                # If no fields matched or nothing returned above, return empty list
+                return []
 
     def show_features(self):
         """表示レイヤ用の検索処理: タイトルが「表示レイヤ」の場合、現在表示中のベクタレイヤを順に検索して集約表示する"""

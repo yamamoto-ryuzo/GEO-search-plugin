@@ -117,20 +117,23 @@ class SearchDialog(QDialog):
 
             layer_name = current_layer.name() if hasattr(current_layer, 'name') else str(current_layer)
 
-            # Build a standard JSON structure for searching this layer
+            # Build a standard JSON structure matching plugin setting schema
+            # Provide an "All" SearchField so the UI has a valid input widget,
+            # and include ViewFields from the layer field names so result table can render.
+            # Build a simple JSON matching README sample
             standard_json = {
+                "group": "ﾌﾟﾛｼﾞｪｸﾄ検索",
                 "Title": layer_name,
                 "Layer": {
                     "LayerType": "Name",
-                    "Name": layer_name
+                    "Name": layer_name,
                 },
-                # default search options
-                "Search": {
-                    "Fields": [],
-                    "FullText": False,
-                    "CaseSensitive": False,
-                    "MatchType": "contains"
-                }
+                "SearchField": {
+                    "FieldType": "Text",
+                    "ViewName": layer_name,
+                    "Field": layer_name
+                },
+                "ViewFields": []
             }
 
             # Log the JSON to QGIS message log for inspection
