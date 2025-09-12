@@ -425,8 +425,11 @@ class SearchDialog(QDialog):
                         print(f"Tab '{current_tab_title}' not found in project variables")
                     return
                     
-                # 更新された設定をJSONに変換
-                new_value = json.dumps(updated_settings, ensure_ascii=False)
+                # 更新された設定をJSONに変換（空リストの場合は空文字列に）
+                if len(updated_settings) == 0:
+                    new_value = ""
+                else:
+                    new_value = json.dumps(updated_settings, ensure_ascii=False)
                 
                 # プロジェクト変数を更新
                 # Method 1: setProjectVariable
