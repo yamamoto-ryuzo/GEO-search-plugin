@@ -121,18 +121,15 @@ class SearchDialog(QDialog):
             # Provide an "All" SearchField so the UI has a valid input widget,
             # and include ViewFields from the layer field names so result table can render.
             # Build a simple JSON matching README sample
+            # Create simple JSON that triggers an all-field search.
+            # Setting "SearchField" to an empty dict {} will be interpreted
+            # by the widget as the All-field and cause full-text search logic to run.
             standard_json = {
                 "group": "ﾌﾟﾛｼﾞｪｸﾄ検索",
                 "Title": layer_name,
-                "Layer": {
-                    "LayerType": "Name",
-                    "Name": layer_name,
-                },
-                "SearchField": {
-                    "FieldType": "Text",
-                    "ViewName": layer_name,
-                    "Field": layer_name
-                },
+                "Layer": {"LayerType": "Name", "Name": layer_name},
+                # empty dict -> SearchWidget will create the All field
+                "SearchField": {},
                 "ViewFields": []
             }
 
