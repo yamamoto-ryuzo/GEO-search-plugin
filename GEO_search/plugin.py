@@ -38,6 +38,7 @@ class plugin(object):
         self._current_group_widget = None
         self._search_features = []
         self._search_group_features = OrderedDict()
+        self.current_layers = []  # 追加されたレイヤを管理するリスト
 
     def _init_language(self):
         """QGISとプラグインの言語設定を自動化"""
@@ -77,6 +78,12 @@ class plugin(object):
         # トリガー構築
         self.action.triggered.connect(self.run)
         self.iface.projectRead.connect(self.create_search_dialog)
+        
+        # プロジェクト変数の変更を検知するために追加のイベント接続
+        try:
+            QgsProject.instance().projectSaved.connect(self.on_project_saved)
+        except Exception:
+            pass
 
     def unload(self):
         # プラグイン終了時に動作
@@ -94,6 +101,14 @@ class plugin(object):
         input_json = ' {"SearchTabs": [ '
         input_json_file = ""
         input_json_variable = ""
+        
+        # 以前のダイアログが存在する場合は閉じる
+        if hasattr(self, 'dialog') and self.dialog:
+            try:
+                self.dialog.close()
+                self.dialog.deleteLater()  # メモリリークを防止
+            except Exception:
+                pass
 
         # setting.jsonの読込
         if os.path.exists(os.path.join(os.path.dirname(__file__), "setting.json")):
@@ -106,7 +121,14 @@ class plugin(object):
         # プロジェクト変数から追加読込
         # 変数名 GEO-search-plugin
         ProjectInstance = QgsProject.instance()
-        # テキストとして読込
+        
+        # リフレッシュを試みる
+        try:
+            ProjectInstance.reloadAllLayers()
+        except Exception:
+            pass
+            
+        # テキストとして読込 - 複数の方法を試す
         try:
             ctx_var = QgsExpressionContextUtils.projectScope(ProjectInstance).variable(
                 "GEO-search-plugin"
@@ -116,17 +138,21 @@ class plugin(object):
 
         if ctx_var is not None:
             input_json_variable = ctx_var
+            # デバッグ出力
+            print(f"Found variable from projectScope: {ctx_var}")
         else:
             # fallback: try readEntry / custom property
             try:
                 ok, val = ProjectInstance.readEntry('GEO-search-plugin', 'value')
                 if ok:
                     input_json_variable = val
+                    print(f"Found variable from readEntry: {val}")
             except Exception:
                 try:
                     pv = ProjectInstance.customProperty('GEO-search-plugin')
                     if pv is not None:
                         input_json_variable = pv
+                        print(f"Found variable from customProperty: {pv}")
                 except Exception:
                     pass
 
@@ -217,6 +243,17 @@ class plugin(object):
         """検索ダイアログを表示する"""
         # メッセージ表示
         # QMessageBox.information(None, "run", "検索ダイアログ表示", QMessageBox.Yes)
+        
+        # 現在のレイヤの状態を確認
+        try:
+            active_layer = self.iface.activeLayer()
+            if active_layer:
+                active_layer_name = active_layer.name()
+                # ログ出力
+                # QMessageBox.information(None, "アクティブレイヤ", active_layer_name, QMessageBox.Yes)
+        except Exception:
+            pass
+            
         self.dialog.show()
 
     def change_tab_group(self, index):
@@ -243,3 +280,15 @@ class plugin(object):
         self.current_feature.load()
         self.dialog.searchButton.clicked.connect(self.current_feature.show_features)
         self.dialog.searchButton.setEnabled(self.current_feature.widget.isEnabled())
+        
+    def on_project_saved(self):
+        """プロジェクトが保存された時の処理"""
+        try:
+            # プロジェクト変数の変更を確認し、UIを更新
+            self.create_search_dialog()
+            
+            # ダイアログが表示されていれば、再表示する
+            if hasattr(self, 'dialog') and self.dialog and self.dialog.isVisible():
+                self.run()
+        except Exception:
+            pass

@@ -49,6 +49,18 @@ class SearchDialog(QDialog):
                 tab_group_widget.addTab(page, tab_setting["Title"])
             else:
                 self.tabWidget.addTab(page, tab_setting["Title"])
+            
+            # 親のプラグインインスタンスがある場合、current_layersリストを更新
+            try:
+                parent = self.parent()
+                if hasattr(parent, "current_layers"):
+                    # レイヤ情報がある場合、追跡リストに追加
+                    if "Layer" in tab_setting and "Name" in tab_setting["Layer"]:
+                        layer_name = tab_setting["Layer"]["Name"]
+                        if layer_name not in parent.current_layers:
+                            parent.current_layers.append(layer_name)
+            except Exception:
+                pass
 
         self.set_window_title(0)
         self.tabWidget.currentChanged.connect(self.set_window_title)
@@ -189,32 +201,43 @@ class SearchDialog(QDialog):
                 # fallback: set as single-item array string
                 new_value = json.dumps([standard_json], ensure_ascii=False)
 
-            # write back into project variables: try writeEntry, then setCustomProperty
+            # write back into project variables: try all available methods for maximum compatibility
             wrote = False
             try:
                 # Prefer API to set project variable so it appears in Project→Properties→Variables
                 from qgis.core import QgsExpressionContextUtils, QgsMessageLog
+                
+                # Method 1: setProjectVariable
                 try:
                     QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
                     wrote = True
                     read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
                     QgsMessageLog.logMessage(f"Set project variable (project scope): {str(read_back)}", "GEO-search-plugin", 0)
-                except Exception:
-                    # fallback to writeEntry
-                    try:
-                        project.writeEntry('GEO-search-plugin', 'value', new_value)
-                        wrote = True
-                        ok, val = project.readEntry('GEO-search-plugin', 'value')
-                        QgsMessageLog.logMessage(f"Wrote via writeEntry ok={ok} val={val}", "GEO-search-plugin", 0)
-                    except Exception:
-                        wrote = False
-                # regardless, also try setCustomProperty as a last resort
+                    print(f"Set project variable via setProjectVariable: {str(read_back)}")
+                except Exception as err:
+                    print(f"setProjectVariable failed: {err}")
+                
+                # Method 2: writeEntry - always try this too
+                try:
+                    project.writeEntry('GEO-search-plugin', 'value', new_value)
+                    wrote = True
+                    ok, val = project.readEntry('GEO-search-plugin', 'value')
+                    QgsMessageLog.logMessage(f"Wrote via writeEntry ok={ok} val={val}", "GEO-search-plugin", 0)
+                    print(f"Wrote via writeEntry ok={ok} val={val}")
+                except Exception as err:
+                    print(f"writeEntry failed: {err}")
+                
+                # Method 3: setCustomProperty - always try this too
                 try:
                     project.setCustomProperty('GEO-search-plugin', new_value)
                     pv = project.customProperty('GEO-search-plugin')
                     QgsMessageLog.logMessage(f"Set customProperty: {str(pv)}", "GEO-search-plugin", 0)
-                except Exception:
-                    pass
+                    print(f"Set customProperty: {str(pv)}")
+                except Exception as err:
+                    print(f"setCustomProperty failed: {err}")
+                    
+                # プロジェクトの自動保存は行わない（ユーザーが必要なときに保存する）
+                print("Project variable updated, but project not auto-saved")
             except Exception:
                 try:
                     # best-effort: try the old writeEntry then customProperty
@@ -242,3 +265,71 @@ class SearchDialog(QDialog):
                 QgsMessageLog.logMessage(f"add_current_layer_to_project_variable error: {e}", "GEO-search-plugin", 1)
             except Exception:
                 print(f"add_current_layer_to_project_variable error: {e}")
+        
+        # プラグインの再初期化を呼び出して、UIを更新する
+        try:
+            # プロジェクトは自動保存せず、変数の更新のみを行う
+            print("Updating UI without auto-saving the project")
+                
+            # QGISに変更を反映させるための遅延処理を設定
+            try:
+                from qgis.PyQt.QtCore import QTimer
+                from functools import partial
+                
+                def find_plugin_instance():
+                    """プラグインインスタンスを複数の方法で探す"""
+                    parent_plugin = None
+                    
+                    # 方法1: 直接の親を調べる
+                    try:
+                        parent_plugin = self.parent()
+                        if parent_plugin and hasattr(parent_plugin, 'create_search_dialog'):
+                            print("Found plugin via direct parent")
+                            return parent_plugin
+                    except Exception:
+                        pass
+                        
+                    # 方法2: iface経由で探す（可能な場合）
+                    try:
+                        if hasattr(self, 'iface') and self.iface:
+                            from qgis.utils import plugins
+                            for plugin_name, plugin_obj in plugins.items():
+                                if hasattr(plugin_obj, 'create_search_dialog'):
+                                    print(f"Found plugin via plugins dict: {plugin_name}")
+                                    return plugin_obj
+                    except Exception:
+                        pass
+                        
+                    return None
+                
+                def reload_plugin_ui():
+                    try:
+                        # プラグインインスタンスを取得
+                        plugin_instance = find_plugin_instance()
+                        
+                        if plugin_instance:
+                            # 現在のダイアログを閉じる
+                            self.close()
+                            # プラグインの検索ダイアログを再構築
+                            plugin_instance.create_search_dialog()
+                            # 再表示
+                            plugin_instance.run()
+                            print("UI refreshed with new layer")
+                        else:
+                            # プラグインインスタンスが見つからない場合
+                            print("Could not find plugin instance, closing dialog only")
+                            self.close()
+                    except Exception as err:
+                        print(f"Failed in reload_plugin_ui: {err}")
+                
+                # より長い遅延を設定（QGISが変数を更新する時間を確保）
+                QTimer.singleShot(500, reload_plugin_ui)
+                
+            except Exception as e:
+                print(f"Failed to set up timer: {e}")
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"Failed to refresh UI: {e}", "GEO-search-plugin", 2)
+            except Exception:
+                print(f"Failed to refresh UI: {e}")
