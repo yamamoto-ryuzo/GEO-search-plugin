@@ -41,6 +41,13 @@
       </property>
      </widget>
     </item>
+    <item row="1" column="4">
+     <widget class="QPushButton" name="removeTabButton">
+      <property name="text">
+        <string>選択したタブを削除</string>
+      </property>
+     </widget>
+    </item>
    <item row="1" column="0">
     <widget class="QPushButton" name="questionButton">
      <property name="sizePolicy">

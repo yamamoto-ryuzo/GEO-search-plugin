@@ -22,6 +22,7 @@ class SearchDialog(QDialog):
     def __init__(self, setting, parent=None, iface=None):
         super(SearchDialog, self).__init__(parent=parent)
         self.iface = iface
+        self.setting = setting  # 設定を保持
         directory = os.path.join(os.path.dirname(__file__), "ui")
         ui_file = os.path.join(directory, UI_FILE)
         uic.loadUi(ui_file, self)
@@ -34,6 +35,17 @@ class SearchDialog(QDialog):
                 QgsMessageLog.logMessage("addLayerButton connected", "GEO-search-plugin", 0)
             except Exception:
                 print("addLayerButton connected")
+        except Exception:
+            pass
+            
+        # Connect remove tab button if present
+        try:
+            self.removeTabButton.clicked.connect(self.remove_current_tab_from_project_variable)
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("removeTabButton connected", "GEO-search-plugin", 0)
+            except Exception:
+                print("removeTabButton connected")
         except Exception:
             pass
 
@@ -266,10 +278,14 @@ class SearchDialog(QDialog):
             except Exception:
                 print(f"add_current_layer_to_project_variable error: {e}")
         
-        # プラグインの再初期化を呼び出して、UIを更新する
+        # 共通のUIリロードメソッドを呼び出し
+        self.reload_ui("with new layer")
+    
+    def reload_ui(self, message=""):
+        """UIを再読み込みするための共通メソッド"""
         try:
             # プロジェクトは自動保存せず、変数の更新のみを行う
-            print("Updating UI without auto-saving the project")
+            print(f"Updating UI without auto-saving the project: {message}")
                 
             # QGISに変更を反映させるための遅延処理を設定
             try:
@@ -314,7 +330,7 @@ class SearchDialog(QDialog):
                             plugin_instance.create_search_dialog()
                             # 再表示
                             plugin_instance.run()
-                            print("UI refreshed with new layer")
+                            print(f"UI refreshed: {message}")
                         else:
                             # プラグインインスタンスが見つからない場合
                             print("Could not find plugin instance, closing dialog only")
@@ -333,3 +349,135 @@ class SearchDialog(QDialog):
                 QgsMessageLog.logMessage(f"Failed to refresh UI: {e}", "GEO-search-plugin", 2)
             except Exception:
                 print(f"Failed to refresh UI: {e}")
+                
+    def remove_current_tab_from_project_variable(self):
+        """選択されているタブを削除し、プロジェクト変数から対応する設定を削除します"""
+        try:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("remove_current_tab_from_project_variable invoked", "GEO-search-plugin", 0)
+            except Exception:
+                print("remove_current_tab_from_project_variable invoked")
+                
+            # 選択されているタブの情報を取得
+            current_tab = None
+            current_tab_title = None
+            
+            # 親タブがグループタブかどうかをチェック
+            if self.tab_groups:
+                # グループタブの場合、選択されているグループ内の選択されているタブを取得
+                current_group_index = self.tabWidget.currentIndex()
+                current_group_widget = self.tabWidget.widget(current_group_index)
+                
+                if isinstance(current_group_widget, QTabWidget):
+                    # このグループ内の現在のタブを取得
+                    tab_index = current_group_widget.currentIndex()
+                    if tab_index >= 0:
+                        current_tab = current_group_widget.widget(tab_index)
+                        current_tab_title = current_group_widget.tabText(tab_index)
+            else:
+                # 通常のタブの場合、選択されているタブを取得
+                tab_index = self.tabWidget.currentIndex()
+                if tab_index >= 0:
+                    current_tab = self.tabWidget.widget(tab_index)
+                    current_tab_title = self.tabWidget.tabText(tab_index)
+                    
+            # タブが選択されていなければ終了
+            if current_tab is None or current_tab_title is None:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("No tab selected or tab information could not be determined", "GEO-search-plugin", 1)
+                except Exception:
+                    print("No tab selected or tab information could not be determined")
+                return
+                
+            # プロジェクト変数を取得して更新
+            from qgis.core import QgsProject, QgsExpressionContextUtils
+            project = QgsProject.instance()
+            proj_scope = QgsExpressionContextUtils.projectScope(project)
+            existing = proj_scope.variable("GEO-search-plugin")
+            
+            if existing is None or existing == "":
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("No project variable exists to remove from", "GEO-search-plugin", 1)
+                except Exception:
+                    print("No project variable exists to remove from")
+                return
+                
+            try:
+                # JSONとして解析
+                parsed = json.loads(existing)
+                
+                # 配列でなければ配列に変換
+                if not isinstance(parsed, list):
+                    parsed = [parsed]
+                    
+                # タブのタイトルが一致する項目を探して削除
+                updated_settings = [item for item in parsed if item.get("Title") != current_tab_title]
+                
+                # 変更があったかチェック
+                if len(updated_settings) == len(parsed):
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Tab '{current_tab_title}' not found in project variables", "GEO-search-plugin", 1)
+                    except Exception:
+                        print(f"Tab '{current_tab_title}' not found in project variables")
+                    return
+                    
+                # 更新された設定をJSONに変換
+                new_value = json.dumps(updated_settings, ensure_ascii=False)
+                
+                # プロジェクト変数を更新
+                # Method 1: setProjectVariable
+                try:
+                    QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
+                    read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Updated project variable after removing tab: {str(read_back)}", "GEO-search-plugin", 0)
+                    except Exception:
+                        print(f"Updated project variable after removing tab: {str(read_back)}")
+                except Exception as err:
+                    print(f"setProjectVariable failed: {err}")
+                
+                # Method 2: writeEntry
+                try:
+                    project.writeEntry('GEO-search-plugin', 'value', new_value)
+                    ok, val = project.readEntry('GEO-search-plugin', 'value')
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Wrote via writeEntry after removing tab ok={ok} val={val}", "GEO-search-plugin", 0)
+                    except Exception:
+                        print(f"Wrote via writeEntry after removing tab ok={ok} val={val}")
+                except Exception as err:
+                    print(f"writeEntry failed: {err}")
+                
+                # Method 3: setCustomProperty
+                try:
+                    project.setCustomProperty('GEO-search-plugin', new_value)
+                    pv = project.customProperty('GEO-search-plugin')
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Set customProperty after removing tab: {str(pv)}", "GEO-search-plugin", 0)
+                    except Exception:
+                        print(f"Set customProperty after removing tab: {str(pv)}")
+                except Exception as err:
+                    print(f"setCustomProperty failed: {err}")
+                    
+                # 共通のUIリロードメソッドを呼び出し
+                self.reload_ui("after removing tab")
+                
+            except Exception as e:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Error updating project variable: {e}", "GEO-search-plugin", 1)
+                except Exception:
+                    print(f"Error updating project variable: {e}")
+                
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"remove_current_tab_from_project_variable error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"remove_current_tab_from_project_variable error: {e}")
