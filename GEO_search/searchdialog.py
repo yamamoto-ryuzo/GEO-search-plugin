@@ -150,27 +150,92 @@ class SearchDialog(QDialog):
             # existing is expected to be a JSON fragment (e.g., array element), try to merge
             try:
                 if existing is None or existing == "":
-                    new_value = json.dumps([standard_json], ensure_ascii=False)
+                    merged = [standard_json]
+                    # log merged
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Merging: existing empty -> merged={json.dumps(merged, ensure_ascii=False)}", "GEO-search-plugin", 0)
+                    except Exception:
+                        print("Merging: existing empty -> merged=", json.dumps(merged, ensure_ascii=False))
+                    new_value = json.dumps(merged, ensure_ascii=False)
                 else:
-                    # try to parse existing as JSON array; if not array, wrap
+                    # try to parse existing as JSON; coerce non-list to list then append
                     parsed = json.loads(existing)
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Parsed existing value: {json.dumps(parsed, ensure_ascii=False)}", "GEO-search-plugin", 0)
+                    except Exception:
+                        print("Parsed existing value:", parsed)
+
                     if isinstance(parsed, list):
                         parsed.append(standard_json)
-                        new_value = json.dumps(parsed, ensure_ascii=False)
+                        merged = parsed
                     else:
-                        new_value = json.dumps([parsed, standard_json], ensure_ascii=False)
-            except Exception:
+                        merged = [parsed, standard_json]
+
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Merged JSON to write: {json.dumps(merged, ensure_ascii=False)}", "GEO-search-plugin", 0)
+                    except Exception:
+                        print("Merged JSON to write:", json.dumps(merged, ensure_ascii=False))
+
+                    new_value = json.dumps(merged, ensure_ascii=False)
+            except Exception as e:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Error while merging existing project variable: {e}", "GEO-search-plugin", 1)
+                except Exception:
+                    print(f"Error while merging existing project variable: {e}")
                 # fallback: set as single-item array string
                 new_value = json.dumps([standard_json], ensure_ascii=False)
 
             # write back into project variables: try writeEntry, then setCustomProperty
+            wrote = False
             try:
-                project.writeEntry('GEO-search-plugin', 'value', new_value)
-            except Exception:
+                # Prefer API to set project variable so it appears in Project→Properties→Variables
+                from qgis.core import QgsExpressionContextUtils, QgsMessageLog
                 try:
-                    project.setCustomProperty("GEO-search-plugin", new_value)
+                    QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
+                    wrote = True
+                    read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
+                    QgsMessageLog.logMessage(f"Set project variable (project scope): {str(read_back)}", "GEO-search-plugin", 0)
+                except Exception:
+                    # fallback to writeEntry
+                    try:
+                        project.writeEntry('GEO-search-plugin', 'value', new_value)
+                        wrote = True
+                        ok, val = project.readEntry('GEO-search-plugin', 'value')
+                        QgsMessageLog.logMessage(f"Wrote via writeEntry ok={ok} val={val}", "GEO-search-plugin", 0)
+                    except Exception:
+                        wrote = False
+                # regardless, also try setCustomProperty as a last resort
+                try:
+                    project.setCustomProperty('GEO-search-plugin', new_value)
+                    pv = project.customProperty('GEO-search-plugin')
+                    QgsMessageLog.logMessage(f"Set customProperty: {str(pv)}", "GEO-search-plugin", 0)
                 except Exception:
                     pass
+            except Exception:
+                try:
+                    # best-effort: try the old writeEntry then customProperty
+                    project.writeEntry('GEO-search-plugin', 'value', new_value)
+                    try:
+                        from qgis.core import QgsMessageLog
+                        ok, val = project.readEntry('GEO-search-plugin', 'value')
+                        QgsMessageLog.logMessage(f"Wrote via writeEntry ok={ok} val={val}", "GEO-search-plugin", 0)
+                    except Exception:
+                        print("Wrote via writeEntry (fallback)")
+                except Exception:
+                    try:
+                        project.setCustomProperty('GEO-search-plugin', new_value)
+                        try:
+                            from qgis.core import QgsMessageLog
+                            pv = project.customProperty('GEO-search-plugin')
+                            QgsMessageLog.logMessage(f"Set customProperty (fallback): {str(pv)}", "GEO-search-plugin", 0)
+                        except Exception:
+                            print('Set customProperty (fallback)')
+                    except Exception:
+                        pass
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog
