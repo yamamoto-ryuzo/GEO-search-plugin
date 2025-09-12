@@ -498,13 +498,47 @@ class SearchDialog(QDialog):
                 print(f"remove_current_tab_from_project_variable error: {e}")
                 
     def edit_project_variable(self):
-        """プロジェクト変数を編集するためのダイアログを表示します"""
+        """現在選択されているタブのレイヤー設定を編集するためのダイアログを表示します"""
         try:
             try:
                 from qgis.core import QgsMessageLog
                 QgsMessageLog.logMessage("edit_project_variable invoked", "GEO-search-plugin", 0)
             except Exception:
                 print("edit_project_variable invoked")
+            
+            # 現在選択されているタブの情報を取得
+            current_tab = None
+            current_tab_title = None
+            current_tab_index = -1
+            
+            # 親タブがグループタブかどうかをチェック
+            if self.tab_groups:
+                # グループタブの場合、選択されているグループ内の選択されているタブを取得
+                current_group_index = self.tabWidget.currentIndex()
+                current_group_widget = self.tabWidget.widget(current_group_index)
+                
+                if isinstance(current_group_widget, QTabWidget):
+                    # このグループ内の現在のタブを取得
+                    tab_index = current_group_widget.currentIndex()
+                    if tab_index >= 0:
+                        current_tab = current_group_widget.widget(tab_index)
+                        current_tab_title = current_group_widget.tabText(tab_index)
+            else:
+                # 通常のタブの場合、選択されているタブを取得
+                tab_index = self.tabWidget.currentIndex()
+                if tab_index >= 0:
+                    current_tab = self.tabWidget.widget(tab_index)
+                    current_tab_title = self.tabWidget.tabText(tab_index)
+                    current_tab_index = tab_index
+            
+            # タブが選択されていなければ終了
+            if current_tab is None or current_tab_title is None:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("No tab selected or tab information could not be determined", "GEO-search-plugin", 1)
+                except Exception:
+                    print("No tab selected or tab information could not be determined")
+                return
                 
             # プロジェクト変数を取得
             from qgis.core import QgsProject, QgsExpressionContextUtils
@@ -520,38 +554,184 @@ class SearchDialog(QDialog):
                 except Exception:
                     print("No existing project variable, creating empty array")
             
+            # 現在のタブに対応する設定を見つける
+            tab_config = None
+            all_configs = []
+            tab_index_in_config = -1
+            
+            try:
+                parsed = json.loads(existing)
+                # 配列でなければ配列に変換
+                if not isinstance(parsed, list):
+                    parsed = [parsed]
+                    
+                all_configs = parsed
+                
+                # タイトルが一致する設定を探す
+                for i, config in enumerate(parsed):
+                    if config.get("Title") == current_tab_title:
+                        tab_config = config
+                        tab_index_in_config = i
+                        break
+                
+                # 設定が見つからなければ、現在のタブに基づいて新しい設定を作成
+                if tab_config is None:
+                    tab_config = {
+                        "Title": current_tab_title,
+                        "Layer": {},
+                        "SearchField": {},
+                        "ViewFields": []
+                    }
+                    # タブに設定がある場合は取得を試みる
+                    if hasattr(current_tab, "setting") and current_tab.setting:
+                        try:
+                            # 設定全体を取得
+                            if isinstance(current_tab.setting, dict):
+                                tab_config = current_tab.setting.copy()
+                            else:
+                                tab_config = current_tab.setting
+                        except Exception as err:
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage(f"Error getting tab setting: {err}", "GEO-search-plugin", 1)
+                            except Exception:
+                                print(f"Error getting tab setting: {err}")
+            except Exception as e:
+                tab_config = {
+                    "Title": current_tab_title,
+                    "Layer": {},
+                    "SearchField": {},
+                    "ViewFields": []
+                }
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Error parsing project variable: {e}", "GEO-search-plugin", 1)
+                except Exception:
+                    print(f"Error parsing project variable: {e}")
+            
             # 編集ダイアログを作成
             edit_dialog = QDialog(self)
-            edit_dialog.setWindowTitle("プロジェクト変数の編集")
-            edit_dialog.setMinimumSize(700, 500)
+            edit_dialog.setWindowTitle(f"タブ設定の編集: {current_tab_title}")
+            edit_dialog.setMinimumSize(700, 600)
             
             layout = QVBoxLayout(edit_dialog)
             
-            # テキストエディタ
-            text_edit = QTextEdit(edit_dialog)
-            text_edit.setFont(self.get_monospace_font())
+            # インポート
+            from qgis.PyQt.QtWidgets import QLabel, QGridLayout, QFrame
             
-            # 整形されたJSONを表示
-            try:
-                parsed = json.loads(existing)
-                formatted_json = json.dumps(parsed, indent=2, ensure_ascii=False)
-                text_edit.setText(formatted_json)
-            except Exception as e:
-                text_edit.setText(existing)
-                try:
-                    from qgis.core import QgsMessageLog
-                    QgsMessageLog.logMessage(f"Error formatting JSON: {e}", "GEO-search-plugin", 1)
-                except Exception:
-                    print(f"Error formatting JSON: {e}")
+            # フォームレイアウトで編集可能フィールドと読み取り専用フィールドを分ける
+            grid_layout = QGridLayout()
             
-            layout.addWidget(text_edit)
+            # 編集可能フィールドを抽出
+            editable_fields = {}
+            readonly_fields = {}
+            
+            # グループ (group)
+            if "group" in tab_config:
+                editable_fields["group"] = tab_config["group"]
+            else:
+                editable_fields["group"] = "未設定"
+                
+            # タイトル (Title)
+            if "Title" in tab_config:
+                editable_fields["Title"] = tab_config["Title"]
+            else:
+                editable_fields["Title"] = current_tab_title
+                
+            # 検索フィールド (SearchField)
+            if "SearchField" in tab_config:
+                editable_fields["SearchField"] = tab_config["SearchField"]
+            else:
+                editable_fields["SearchField"] = {}
+                
+            # 表示フィールド (ViewFields)
+            if "ViewFields" in tab_config:
+                editable_fields["ViewFields"] = tab_config["ViewFields"]
+            else:
+                editable_fields["ViewFields"] = []
+                
+            # その他の読み取り専用フィールド
+            for key, value in tab_config.items():
+                if key not in ["group", "Title", "SearchField", "ViewFields"]:
+                    readonly_fields[key] = value
+                    
+            # テキストエディタを作成
+            editors = {}
+            
+            # 編集可能フィールドの設定
+            row = 0
+            for field_name, field_value in editable_fields.items():
+                # ラベル
+                label = QLabel(f"{field_name}:", edit_dialog)
+                label.setStyleSheet("font-weight: bold;")
+                grid_layout.addWidget(label, row, 0)
+                
+                # エディタ
+                editor = QTextEdit(edit_dialog)
+                editor.setFont(self.get_monospace_font())
+                editor.setMinimumHeight(80)
+                
+                # フィールドの内容をJSONとして表示
+                json_str = json.dumps(field_value, indent=2, ensure_ascii=False)
+                editor.setText(json_str)
+                
+                grid_layout.addWidget(editor, row, 1)
+                editors[field_name] = editor
+                
+                row += 1
+            
+            # 読み取り専用フィールドがあれば、セクション区切りを追加
+            if readonly_fields:
+                separator = QFrame()
+                separator.setFrameShape(QFrame.HLine)
+                separator.setFrameShadow(QFrame.Sunken)
+                grid_layout.addWidget(separator, row, 0, 1, 2)
+                row += 1
+                
+                # 読み取り専用ヘッダー
+                readonly_label = QLabel("以下のフィールドは読み取り専用です:", edit_dialog)
+                readonly_label.setStyleSheet("font-weight: bold; color: #777777;")
+                grid_layout.addWidget(readonly_label, row, 0, 1, 2)
+                row += 1
+                
+                # 読み取り専用フィールドの表示
+                for field_name, field_value in readonly_fields.items():
+                    # ラベル
+                    label = QLabel(f"{field_name}:", edit_dialog)
+                    label.setStyleSheet("color: #777777;")
+                    grid_layout.addWidget(label, row, 0)
+                    
+                    # 表示のみのエディタ
+                    editor = QTextEdit(edit_dialog)
+                    editor.setFont(self.get_monospace_font())
+                    editor.setReadOnly(True)
+                    editor.setStyleSheet("background-color: #f0f0f0;")
+                    editor.setMinimumHeight(60)
+                    editor.setMaximumHeight(80)
+                    
+                    # フィールドの内容をJSONとして表示
+                    json_str = json.dumps(field_value, indent=2, ensure_ascii=False)
+                    editor.setText(json_str)
+                    
+                    grid_layout.addWidget(editor, row, 1)
+                    
+                    row += 1
+            
+            layout.addLayout(grid_layout)
             
             # ボタン配置
             button_layout = QHBoxLayout()
             
             # 保存ボタン
             save_button = QPushButton("保存", edit_dialog)
-            save_button.clicked.connect(lambda: self.save_project_variable(text_edit.toPlainText(), edit_dialog))
+            save_button.clicked.connect(lambda: self.save_tab_config_by_fields(
+                editors,
+                readonly_fields,
+                edit_dialog, 
+                all_configs, 
+                tab_index_in_config, 
+                current_tab_title
+            ))
             button_layout.addWidget(save_button)
             
             # キャンセルボタン
@@ -582,8 +762,151 @@ class SearchDialog(QDialog):
         except Exception:
             return None
                 
+    def save_tab_config_by_fields(self, editors, readonly_fields, dialog, all_configs, tab_index, tab_title):
+        """各フィールドエディタから値を取得してタブ設定を保存"""
+        try:
+            # 新しい設定を構築
+            tab_config = {}
+            
+            # 読み取り専用フィールドをコピー
+            for field_name, field_value in readonly_fields.items():
+                tab_config[field_name] = field_value
+            
+            # 編集可能フィールドを処理
+            error_messages = []
+            for field_name, editor in editors.items():
+                text = editor.toPlainText()
+                try:
+                    # JSONとして解析
+                    field_value = json.loads(text)
+                    tab_config[field_name] = field_value
+                except Exception as e:
+                    error_messages.append(f"フィールド '{field_name}' のJSONエラー: {str(e)}")
+            
+            # エラーがあれば表示して終了
+            if error_messages:
+                QMessageBox.warning(self, "JSONエラー", "\n".join(error_messages))
+                return
+                
+            # タイトルを確認
+            if "Title" in tab_config and tab_config["Title"] != tab_title:
+                # 警告を表示してタイトルを修正
+                QMessageBox.information(self, "タイトルの調整", 
+                    f"タイトルは自動的に '{tab_title}' に設定されます。タブ名を変更するには、新しいタブを作成してください。")
+                tab_config["Title"] = tab_title
+            
+            # 設定を保存
+            self._update_config_and_save(tab_config, dialog, all_configs, tab_index)
+            
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"save_tab_config_by_fields error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"save_tab_config_by_fields error: {e}")
+            QMessageBox.warning(self, "エラー", f"タブ設定の保存中にエラーが発生しました:\n{str(e)}")
+    
+    def save_tab_config(self, text, dialog, all_configs, tab_index, tab_title):
+        """タブの設定を保存（単一テキストエディタから）"""
+        try:
+            # JSONとして解析できるかチェック
+            try:
+                tab_config = json.loads(text)
+                
+                # タブ名を一貫させるために、タイトルを現在のタブ名に設定
+                if "Title" in tab_config and tab_config["Title"] != tab_title:
+                    tab_config["Title"] = tab_title
+                    
+            except Exception as e:
+                QMessageBox.warning(self, "JSONエラー", f"入力されたテキストはJSONとして有効ではありません:\n{str(e)}")
+                return
+                
+            # 設定の更新と保存の共通処理を呼び出し
+            self._update_config_and_save(tab_config, dialog, all_configs, tab_index)
+                
+        except Exception as e:
+            QMessageBox.warning(self, "エラー", f"タブ設定の保存中にエラーが発生しました:\n{str(e)}")
+            
+    def _update_config_and_save(self, tab_config, dialog, all_configs, tab_index):
+        """設定を更新し、プロジェクト変数に保存する共通処理"""
+        try:
+            # 設定の処理を開始
+            # プロジェクト変数を更新
+            from qgis.core import QgsProject, QgsExpressionContextUtils
+            project = QgsProject.instance()
+            
+            # 設定を更新または追加
+            if tab_index >= 0 and tab_index < len(all_configs):
+                # 既存の設定を更新
+                all_configs[tab_index] = tab_config
+            else:
+                # 新しい設定を追加
+                all_configs.append(tab_config)
+                
+            # JSONを文字列に変換
+            new_value = json.dumps(all_configs, ensure_ascii=False)
+            
+            # 変数を更新 (複数の方法で試行)
+            # Method 1: setProjectVariable
+            try:
+                QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
+                read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Updated project variable: {str(read_back)}", "GEO-search-plugin", 0)
+                except Exception:
+                    print(f"Updated project variable: {str(read_back)}")
+            except Exception as err:
+                print(f"setProjectVariable failed: {err}")
+            
+            # Method 2: writeEntry
+            try:
+                project.writeEntry('GEO-search-plugin', 'value', new_value)
+                ok, val = project.readEntry('GEO-search-plugin', 'value')
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Wrote via writeEntry ok={ok} val={val}", "GEO-search-plugin", 0)
+                except Exception:
+                    print(f"Wrote via writeEntry ok={ok} val={val}")
+            except Exception as err:
+                print(f"writeEntry failed: {err}")
+            
+            # Method 3: setCustomProperty
+            try:
+                project.setCustomProperty('GEO-search-plugin', new_value)
+                pv = project.customProperty('GEO-search-plugin')
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Set customProperty: {str(pv)}", "GEO-search-plugin", 0)
+                except Exception:
+                    print(f"Set customProperty: {str(pv)}")
+            except Exception as err:
+                print(f"setCustomProperty failed: {err}")
+                
+            # ダイアログを閉じる
+            dialog.accept()
+            
+            # UI再読み込み
+            self.reload_ui("after editing tab configuration")
+            
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_update_config_and_save error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"_update_config_and_save error: {e}")
+            QMessageBox.warning(dialog, "エラー", f"設定の保存中にエラーが発生しました:\n{str(e)}")
+            
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"save_tab_config error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"save_tab_config error: {e}")
+            QMessageBox.warning(self, "エラー", f"タブ設定の保存中にエラーが発生しました:\n{str(e)}")
+    
     def save_project_variable(self, text, dialog):
-        """プロジェクト変数を保存"""
+        """プロジェクト変数を保存（古いメソッド - 互換性のために残しています）"""
         try:
             # JSONとして解析できるかチェック
             try:
