@@ -4,7 +4,7 @@ import json
 from collections import OrderedDict
 
 from qgis.PyQt.QtWidgets import QDialog, QTabWidget, QTextEdit, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox
-from qgis.PyQt.QtWidgets import QLabel, QGridLayout, QFrame, QCheckBox, QScrollArea, QWidget
+from qgis.PyQt.QtWidgets import QLabel, QGridLayout, QFrame, QCheckBox, QScrollArea, QWidget, QButtonGroup, QRadioButton
 from qgis.PyQt.QtCore import Qt
 
 from qgis.PyQt import uic
@@ -684,21 +684,58 @@ class SearchDialog(QDialog):
                 
                 row += 1
                 
-            # ViewFields 用のボタンを追加
-            # フィールド選択補助ボタン - ViewFields編集用
-            helper_layout = QHBoxLayout()
-            
             # レイヤー名を取得
             layer_name = ""
             if "Layer" in tab_config and "Name" in tab_config["Layer"]:
                 layer_name = tab_config["Layer"]["Name"]
+                
+            # SearchField のエディタを取得
+            searchfield_editor = editors.get("SearchField")
+            
+            if searchfield_editor:
+                # フィールド選択ボタン用のレイアウト
+                searchfield_layout = QHBoxLayout()
+                
+                # 現在の値を取得
+                try:
+                    current_search_field = json.loads(searchfield_editor.toPlainText())
+                except:
+                    current_search_field = {}
+                    
+                # フィールド選択ボタン
+                select_search_field_button = QPushButton("検索フィールド選択ウィザード", edit_dialog)
+                
+                # ボタンクリック時の処理
+                select_search_field_button.clicked.connect(
+                    lambda: self.edit_search_field(
+                        current_search_field,
+                        layer_name,
+                        edit_dialog,
+                        lambda new_field: searchfield_editor.setText(json.dumps(new_field, indent=2, ensure_ascii=False))
+                    )
+                )
+                
+                searchfield_layout.addWidget(select_search_field_button)
+                searchfield_layout.addStretch()
+                
+                # 補助ラベル
+                search_field_help_label = QLabel("※「SearchField」フィールドを直接編集するか、検索フィールド選択ウィザードを使用できます", edit_dialog)
+                search_field_help_label.setStyleSheet("color: #555555; font-style: italic;")
+                
+                # レイアウトに追加
+                layout.addLayout(searchfield_layout)
+                layout.addWidget(search_field_help_label)
+            
+            # ViewFields 用のボタンを追加
+            # フィールド選択補助ボタン - ViewFields編集用
+            helper_layout = QHBoxLayout()
                 
             # ViewFieldsのエディタを取得
             viewfields_editor = editors.get("ViewFields")
             
             if viewfields_editor:
                 # フィールド選択ボタン
-                select_fields_button = QPushButton("フィールド選択ウィザード", edit_dialog)
+                select_fields_button = QPushButton("表示フィールド選択ウィザード", edit_dialog)
                 
                 # 現在の値を取得
                 try:
@@ -722,7 +759,7 @@ class SearchDialog(QDialog):
                 helper_layout.addStretch()
                 
                 # 補助ラベル
-                help_label = QLabel("※「ViewFields」フィールドを直接編集するか、フィールド選択ウィザードを使用できます", edit_dialog)
+                help_label = QLabel("※「ViewFields」フィールドを直接編集するか、表示フィールド選択ウィザードを使用できます", edit_dialog)
                 help_label.setStyleSheet("color: #555555; font-style: italic;")
                 
                 # レイアウトに追加
@@ -834,10 +871,22 @@ class SearchDialog(QDialog):
                     break
             
             # レイヤーの属性を取得
-            available_fields = []
+            available_fields = []  # リストの各要素は (field_name, display_name) のタプル
+            field_aliases = {}     # フィールド名と別名の辞書
+            
             if layer:
                 for field in layer.fields():
-                    available_fields.append(field.name())
+                    field_name = field.name()
+                    field_alias = field.alias() or field_name  # エイリアスがなければ名前を使用
+                    
+                    # フィールド名と表示名（フィールド名 - エイリアス）のタプルを保存
+                    if field_alias != field_name and field_alias:
+                        display_name = f"{field_name} - {field_alias}"
+                    else:
+                        display_name = field_name
+                        
+                    available_fields.append((field_name, display_name))
+                    field_aliases[field_name] = field_alias
             else:
                 # レイヤーが見つからない場合、現在のフィールドを使用
                 try:
@@ -848,7 +897,7 @@ class SearchDialog(QDialog):
                 
                 # 現在のフィールドが空でない場合は使用
                 if isinstance(current_fields, list) and current_fields:
-                    available_fields = [field for field in current_fields]
+                    available_fields = [(field, field) for field in current_fields]
             
             # ダイアログを作成
             fields_dialog = QDialog(dialog)
@@ -869,13 +918,13 @@ class SearchDialog(QDialog):
             
             # チェックボックス
             checkboxes = {}
-            for field_name in available_fields:
-                checkbox = QCheckBox(field_name, scroll_content)
+            for field_name, display_name in available_fields:
+                checkbox = QCheckBox(display_name, scroll_content)
                 # 現在選択されているフィールドはチェックを入れる
                 if isinstance(current_fields, list) and field_name in current_fields:
                     checkbox.setChecked(True)
                 scroll_layout.addWidget(checkbox)
-                checkboxes[field_name] = checkbox
+                checkboxes[field_name] = checkbox  # キーはフィールド名、値はチェックボックス
             
             # 空きスペースを追加
             scroll_layout.addStretch(1)
@@ -909,6 +958,171 @@ class SearchDialog(QDialog):
             except Exception:
                 print(f"edit_view_fields error: {e}")
             QMessageBox.warning(dialog, "エラー", f"表示フィールドの編集中にエラーが発生しました:\n{str(e)}")
+            
+    def edit_search_field(self, current_search_field, layer_name, dialog, callback):
+        """SearchFieldを編集するためのダイアログを表示する"""
+        try:
+            # レイヤーを取得
+            layer = None
+            project = QgsProject.instance()
+            
+            # レイヤー名でレイヤーを検索
+            for lyr in project.mapLayers().values():
+                if lyr.name() == layer_name:
+                    layer = lyr
+                    break
+            
+            # 利用可能なフィールドを取得
+            available_fields = []  # リストの各要素は (field_name, display_name) のタプル
+            field_aliases = {}     # フィールド名と別名の辞書
+            
+            if layer:
+                for field in layer.fields():
+                    field_name = field.name()
+                    field_alias = field.alias() or field_name  # エイリアスがなければ名前を使用
+                    
+                    # フィールド名と表示名（フィールド名 - エイリアス）のタプルを保存
+                    if field_alias != field_name and field_alias:
+                        display_name = f"{field_name} - {field_alias}"
+                    else:
+                        display_name = field_name
+                        
+                    available_fields.append((field_name, display_name))
+                    field_aliases[field_name] = field_alias
+            else:
+                # レイヤーが見つからない場合は、現在のフィールドから取得
+                if isinstance(current_search_field, dict) and current_search_field:
+                    # 既存のSearchField構造からフィールド名を抽出
+                    for key in current_search_field:
+                        if key != "ViewName" and key != "all":  # 特殊キーを除外
+                            available_fields.append((key, key))  # 別名情報がないのでフィールド名のみ
+                
+            # All フィールドを先頭に追加
+            available_fields.insert(0, ("全フィールド検索", "全フィールド検索"))
+            
+            # ダイアログを作成
+            fields_dialog = QDialog(dialog)
+            fields_dialog.setWindowTitle(f"検索フィールドの選択: {layer_name}")
+            fields_dialog.setMinimumSize(400, 300)
+            
+            layout = QVBoxLayout(fields_dialog)
+            
+            # 説明ラベル
+            info_label = QLabel("検索に使用するフィールドを選択してください:", fields_dialog)
+            layout.addWidget(info_label)
+            
+            # ラジオボタングループ
+            radio_group = QButtonGroup(fields_dialog)
+            
+            # スクロールエリア
+            scroll_area = QScrollArea(fields_dialog)
+            scroll_area.setWidgetResizable(True)
+            scroll_content = QWidget(scroll_area)
+            scroll_layout = QVBoxLayout(scroll_content)
+            
+            # ラジオボタン
+            selected_index = 0  # デフォルトは「全フィールド検索」
+            
+            for i, (field_name, display_name) in enumerate(available_fields):
+                radio = QRadioButton(display_name, scroll_content)
+                radio_group.addButton(radio, i)
+                
+                # 現在の設定と一致するフィールドを選択状態にする
+                if i == 0:  # 「全フィールド検索」の場合
+                    if isinstance(current_search_field, dict) and not current_search_field:
+                        # 空のオブジェクトは「全フィールド検索」
+                        radio.setChecked(True)
+                        selected_index = i
+                    elif isinstance(current_search_field, dict) and current_search_field.get("all"):
+                        # "all": true がある場合も「全フィールド検索」
+                        radio.setChecked(True)
+                        selected_index = i
+                else:
+                    # 特定のフィールド検索の場合
+                    if isinstance(current_search_field, dict) and field_name in current_search_field:
+                        radio.setChecked(True)
+                        selected_index = i
+                
+                scroll_layout.addWidget(radio)
+            
+            # 少なくとも1つのボタンが選択されていることを確認
+            if not radio_group.checkedButton() and radio_group.buttons():
+                radio_group.buttons()[selected_index].setChecked(True)
+            
+            # 空きスペースを追加
+            scroll_layout.addStretch(1)
+            
+            scroll_content.setLayout(scroll_layout)
+            scroll_area.setWidget(scroll_content)
+            layout.addWidget(scroll_area)
+            
+            # ボタン配置
+            button_layout = QHBoxLayout()
+            
+            # 保存ボタン
+            save_button = QPushButton("保存", fields_dialog)
+            save_button.clicked.connect(lambda: self._save_search_field(radio_group, available_fields, field_aliases, fields_dialog, callback))
+            button_layout.addWidget(save_button)
+            
+            # キャンセルボタン
+            cancel_button = QPushButton("キャンセル", fields_dialog)
+            cancel_button.clicked.connect(fields_dialog.reject)
+            button_layout.addWidget(cancel_button)
+            
+            layout.addLayout(button_layout)
+            
+            # ダイアログを表示
+            fields_dialog.exec_()
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"edit_search_field error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"edit_search_field error: {e}")
+            QMessageBox.warning(dialog, "エラー", f"検索フィールドの編集中にエラーが発生しました:\n{str(e)}")
+    
+    def _save_search_field(self, radio_group, available_fields, field_aliases, dialog, callback):
+        """選択された検索フィールドを保存する"""
+        try:
+            selected_button = radio_group.checkedButton()
+            if not selected_button:
+                # 選択されていない場合は全フィールド検索
+                search_field = {}
+            else:
+                selected_id = radio_group.id(selected_button)
+                selected_field_tuple = available_fields[selected_id]
+                
+                # タプルからフィールド名を取得 (field_name, display_name)
+                field_name = selected_field_tuple[0]  # フィールド名は常に最初の要素
+                
+                if selected_id == 0:  # 「全フィールド検索」
+                    # 空のオブジェクトまたは "all": true を設定
+                    search_field = {"ViewName": "All", "all": True}
+                else:
+                    # 特定のフィールドを設定
+                    # フィールドの別名がある場合はそれをViewNameに設定
+                    if field_name in field_aliases and field_aliases[field_name] != field_name:
+                        view_name = field_aliases[field_name]  # 別名をViewNameに使用
+                    else:
+                        view_name = field_name  # 別名がなければフィールド名を使用
+                    
+                    search_field = {
+                        "ViewName": view_name,
+                        field_name: ""
+                    }
+            
+            # コールバック関数を呼び出して結果を返す
+            callback(search_field)
+            
+            # ダイアログを閉じる
+            dialog.accept()
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_save_search_field error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                print(f"_save_search_field error: {e}")
+            QMessageBox.warning(dialog, "エラー", f"検索フィールドの保存中にエラーが発生しました:\n{str(e)}")
     
     def _save_view_fields(self, checkboxes, dialog, callback):
         """チェックされたフィールドを保存する"""
