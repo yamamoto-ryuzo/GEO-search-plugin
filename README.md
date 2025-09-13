@@ -1,6 +1,6 @@
 # 地図検索  
 最終的には https://github.com/NationalSecurityAgency/qgis-searchlayers-plugin と統合したい  
-### UI設定画面  
+### UI設定画面(プロジェクトファイルに設定されます)  
 <img width="698" height="741" alt="image" src="https://github.com/user-attachments/assets/a942f8ae-09b7-49b2-a4e3-53d9e712b877" />
 
 ### 地番検索  
@@ -292,6 +292,7 @@ QGISで読み込んでいるレイヤを検索対象とする。
 | --- | --- | --- |
 | SampleFields | 未使用 | list[str] |
 | SampleTableLimit | 未使用 | list[str] |
+
 
 
 
