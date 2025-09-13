@@ -1,11 +1,17 @@
 # 地図検索  
 最終的には https://github.com/NationalSecurityAgency/qgis-searchlayers-plugin と統合したい  
-　地番検索  
+### UI[設定画面  
+<img width="698" height="741" alt="image" src="https://github.com/user-attachments/assets/a942f8ae-09b7-49b2-a4e3-53d9e712b877" />
+
+### 地番検索  
 ![image](https://user-images.githubusercontent.com/86514652/183770100-a385fad3-bc25-47f8-919c-659554c1f7e3.png)  
-　地番の所有者検索  
+
+### 地番の所有者検索  
 ![image](https://user-images.githubusercontent.com/86514652/183770143-61080ecd-7f55-4647-965a-206bc79191d1.png)  
-　汎用的な検索  
+
+### 汎用的な検索  
 ![image](https://github.com/yamamoto-ryuzo/GEO-search-plugin/assets/86514652/4483e588-2c1d-4133-9cfe-fc33bb9a5068)  
+
 ## 設定項目
 
 ```json
@@ -286,4 +292,5 @@ QGISで読み込んでいるレイヤを検索対象とする。
 | --- | --- | --- |
 | SampleFields | 未使用 | list[str] |
 | SampleTableLimit | 未使用 | list[str] |
+
 
