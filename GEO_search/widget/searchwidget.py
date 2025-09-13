@@ -98,11 +98,21 @@ class SearchTextWidget(SearchWidget):
         return widgets
 
     def create_widget(self, field):
-        label = QLabel("{}: ".format(field["ViewName"]))
+        # OR検索対象のフィールド名を表示
+        view_name = field.get("ViewName", "")
+        if ":" in view_name and "OR検索" in view_name:
+            # OR検索の場合は既に対象フィールドが含まれているので、そのまま表示
+            label = QLabel("{}".format(view_name))
+        else:
+            label = QLabel("{}: ".format(view_name))
+            
         line_edit = QLineEdit()
         # For "All" field, set placeholder
         if field.get("all"):
             line_edit.setPlaceholderText("Search all fields")
+        # OR検索の場合はプレースホルダーテキストでヒントを表示
+        elif ":" in view_name and "OR検索" in view_name:
+            line_edit.setPlaceholderText("複数フィールドをOR検索します")
         return label, line_edit
 
 

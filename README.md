@@ -227,15 +227,58 @@ QGISで読み込んでいるレイヤを検索対象とする。
 | Geometry | テーブルのGeometryカラム名 | str |
 | FormatSQL | Viewを作成するSQLなどを指定する | FilePath |
 
-### SearchField
+### SearchFieldとSearchFieldsの使い分け
 
-検索に使用するレイヤの属性情報の設定です。
+検索に使用するレイヤの属性情報は、`SearchField`（単一）または`SearchFields`（複数）で設定できます。
+
+#### SearchField
+
+単一の検索フィールド設定です。一つの検索ボックスに対して、複数のフィールドを検索対象にする場合に使用します。
 
 | Property | Description | Type |
 | --- | --- | --- |
 | FieldType | 検索属性名のタイプ。現在未使用。 | Literal["Text"] |
 | ViewName | 表示する属性名 | str |
 | Field | レイヤの属性名 | str |
+
+**複数フィールド検索の例:**
+```json
+"SearchField": {
+  "ViewName": "OR検索: 名称, 住所",
+  "名称": "",
+  "住所": ""
+}
+```
+
+この場合、ユーザーが入力した一つの検索語（例: "東京"）で、名称フィールドと住所フィールドの両方をOR条件で検索します（"名称に東京を含む" OR "住所に東京を含む"）。
+
+#### SearchFields
+
+複数の検索フィールド設定です。複数の検索ボックスを作成し、それぞれに異なる検索条件を設定する場合に使用します。
+
+| Property | Description | Type |
+| --- | --- | --- |
+| FieldType | 検索属性名のタイプ。現在未使用。 | Literal["Text"] |
+| ViewName | 表示する属性名 | str |
+| Field | レイヤの属性名 | str |
+
+**複数検索ボックスの例:**
+```json
+"SearchFields": [
+  {
+    "FieldType": "Text",
+    "ViewName": "名称",
+    "Field": "名称"
+  },
+  {
+    "FieldType": "Text",
+    "ViewName": "住所",
+    "Field": "住所"
+  }
+]
+```
+
+この場合、二つの検索ボックスが作成され、ユーザーは一方に"東京"、もう一方に"本社"というように別々の検索語を入力できます。複数の検索ボックスの条件は基本的にAND結合されます（"名称に東京を含む" AND "住所に本社を含む"）。
 
 ## その他
 

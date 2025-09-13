@@ -216,11 +216,12 @@ class plugin(object):
                         page_limit=settings.get("PageLimit", 1000),
                     )
                 else:
-                    # 通常検索
+                    # 通常検索 - 複数フィールド検索ではORを標準にする
                     feature = SearchTextFeature(
                         self.iface,
                         setting,
                         widget,
+                        andor=" Or ",  # 複数フィールド選択時はOR検索を標準にする
                         page_limit=settings.get("PageLimit", 1000),
                     )
                 # groupごとの配列にする必要がある

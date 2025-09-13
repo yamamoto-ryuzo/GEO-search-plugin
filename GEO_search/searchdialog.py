@@ -840,7 +840,7 @@ class SearchDialog(QDialog):
                     current_search_field = {}
                     
                 # フィールド選択ボタン
-                select_search_field_button = QPushButton("検索フィールド選択ウィザード", edit_dialog)
+                select_search_field_button = QPushButton("検索フィールド選択ウィザード（複数選択可 - OR検索）", edit_dialog)
                 
                 # ボタンクリック時の処理
                 select_search_field_button.clicked.connect(
@@ -856,7 +856,7 @@ class SearchDialog(QDialog):
                 searchfield_layout.addStretch()
                 
                 # 補助ラベル
-                search_field_help_label = QLabel("※「SearchField」フィールドを直接編集するか、検索フィールド選択ウィザードを使用できます", edit_dialog)
+                search_field_help_label = QLabel("※「SearchField」フィールドを直接編集するか、検索フィールド選択ウィザード（複数選択可 - OR検索）を使用できます", edit_dialog)
                 search_field_help_label.setStyleSheet("color: #555555; font-style: italic;")
                 
                 # レイアウトに追加
@@ -1145,11 +1145,8 @@ class SearchDialog(QDialog):
             layout = QVBoxLayout(fields_dialog)
             
             # 説明ラベル
-            info_label = QLabel("検索に使用するフィールドを選択してください:", fields_dialog)
+            info_label = QLabel("検索に使用するフィールドを選択してください（複数選択可 - OR検索）:", fields_dialog)
             layout.addWidget(info_label)
-            
-            # ラジオボタングループ
-            radio_group = QButtonGroup(fields_dialog)
             
             # スクロールエリア
             scroll_area = QScrollArea(fields_dialog)
@@ -1157,34 +1154,37 @@ class SearchDialog(QDialog):
             scroll_content = QWidget(scroll_area)
             scroll_layout = QVBoxLayout(scroll_content)
             
-            # ラジオボタン
-            selected_index = 0  # デフォルトは「全フィールド検索」
+            # チェックボックス（複数選択可能）
+            checkboxes = {}  # フィールド名とチェックボックスのマッピングを保持
+            all_checkbox = None  # 「全フィールド検索」のチェックボックス
             
             for i, (field_name, display_name) in enumerate(available_fields):
-                radio = QRadioButton(display_name, scroll_content)
-                radio_group.addButton(radio, i)
+                checkbox = QCheckBox(display_name, scroll_content)
                 
                 # 現在の設定と一致するフィールドを選択状態にする
                 if i == 0:  # 「全フィールド検索」の場合
+                    all_checkbox = checkbox  # 「全フィールド検索」のチェックボックスを保持
                     if isinstance(current_search_field, dict) and not current_search_field:
                         # 空のオブジェクトは「全フィールド検索」
-                        radio.setChecked(True)
-                        selected_index = i
+                        checkbox.setChecked(True)
                     elif isinstance(current_search_field, dict) and current_search_field.get("all"):
                         # "all": true がある場合も「全フィールド検索」
-                        radio.setChecked(True)
-                        selected_index = i
+                        checkbox.setChecked(True)
                 else:
                     # 特定のフィールド検索の場合
                     if isinstance(current_search_field, dict) and field_name in current_search_field:
-                        radio.setChecked(True)
-                        selected_index = i
+                        checkbox.setChecked(True)
                 
-                scroll_layout.addWidget(radio)
-            
-            # 少なくとも1つのボタンが選択されていることを確認
-            if not radio_group.checkedButton() and radio_group.buttons():
-                radio_group.buttons()[selected_index].setChecked(True)
+                # 「全フィールド検索」と他のチェックボックスの排他制御
+                if i == 0:
+                    # 「全フィールド検索」がチェックされたら他のチェックボックスを無効化
+                    checkbox.stateChanged.connect(lambda state, cb=checkbox: self._toggle_other_checkboxes(cb, checkboxes))
+                else:
+                    # 他のチェックボックスがチェックされたら「全フィールド検索」のチェックを外す
+                    checkbox.stateChanged.connect(lambda state, cb=checkbox, ac=all_checkbox: self._uncheck_all_checkbox(cb, ac))
+                
+                checkboxes[field_name] = checkbox
+                scroll_layout.addWidget(checkbox)
             
             # 空きスペースを追加
             scroll_layout.addStretch(1)
@@ -1198,7 +1198,7 @@ class SearchDialog(QDialog):
             
             # 保存ボタン
             save_button = QPushButton("保存", fields_dialog)
-            save_button.clicked.connect(lambda: self._save_search_field(radio_group, available_fields, field_aliases, fields_dialog, callback))
+            save_button.clicked.connect(lambda: self._save_search_field(checkboxes, available_fields, field_aliases, fields_dialog, callback))
             button_layout.addWidget(save_button)
             
             # キャンセルボタン
@@ -1218,35 +1218,46 @@ class SearchDialog(QDialog):
                 print(f"edit_search_field error: {e}")
             QMessageBox.warning(dialog, "エラー", f"検索フィールドの編集中にエラーが発生しました:\n{str(e)}")
     
-    def _save_search_field(self, radio_group, available_fields, field_aliases, dialog, callback):
-        """選択された検索フィールドを保存する"""
+    def _save_search_field(self, checkboxes, available_fields, field_aliases, dialog, callback):
+        """選択された検索フィールドを保存する（複数選択対応）"""
         try:
-            selected_button = radio_group.checkedButton()
-            if not selected_button:
-                # 選択されていない場合は全フィールド検索
-                search_field = {}
+            # チェックされているフィールドを取得
+            selected_fields = []
+            for field_name, checkbox in checkboxes.items():
+                if checkbox.isChecked():
+                    selected_fields.append(field_name)
+            
+            # 選択がない場合は全フィールド検索
+            if not selected_fields:
+                search_field = {"FieldType": "Text"}
+            elif "全フィールド検索" in selected_fields:
+                # 「全フィールド検索」が選択されている場合
+                search_field = {"FieldType": "Text", "ViewName": "All", "all": True}
             else:
-                selected_id = radio_group.id(selected_button)
-                selected_field_tuple = available_fields[selected_id]
+                # 複数のフィールドが選択されている場合
+                search_field = {"FieldType": "Text"}
                 
-                # タプルからフィールド名を取得 (field_name, display_name)
-                field_name = selected_field_tuple[0]  # フィールド名は常に最初の要素
-                
-                if selected_id == 0:  # 「全フィールド検索」
-                    # 空のオブジェクトまたは "all": true を設定
-                    search_field = {"ViewName": "All", "all": True}
+                # ViewName は最初に選択されたフィールドの別名を使用
+                first_field = selected_fields[0]
+                if first_field in field_aliases and field_aliases[first_field] != first_field:
+                    view_name = field_aliases[first_field]  # 別名をViewNameに使用
                 else:
-                    # 特定のフィールドを設定
-                    # フィールドの別名がある場合はそれをViewNameに設定
-                    if field_name in field_aliases and field_aliases[field_name] != field_name:
-                        view_name = field_aliases[field_name]  # 別名をViewNameに使用
-                    else:
-                        view_name = field_name  # 別名がなければフィールド名を使用
-                    
-                    search_field = {
-                        "ViewName": view_name,
-                        field_name: ""
-                    }
+                    view_name = first_field  # 別名がなければフィールド名を使用
+                
+                # 複数選択の場合、ViewNameを「OR検索」にし、フィールド名も表示
+                if len(selected_fields) > 1:
+                    # フィールド名を集約（最大3つまで表示）
+                    display_fields = selected_fields[:3]
+                    field_display = ", ".join(display_fields)
+                    if len(selected_fields) > 3:
+                        field_display += f" 他{len(selected_fields)-3}個"
+                    view_name = f"OR検索: {field_display}"
+                
+                search_field["ViewName"] = view_name
+                
+                # 選択された各フィールドを追加
+                for field_name in selected_fields:
+                    search_field[field_name] = ""
             
             # コールバック関数を呼び出して結果を返す
             callback(search_field)
@@ -1260,6 +1271,34 @@ class SearchDialog(QDialog):
             except Exception:
                 print(f"_save_search_field error: {e}")
             QMessageBox.warning(dialog, "エラー", f"検索フィールドの保存中にエラーが発生しました:\n{str(e)}")
+    
+    def _toggle_other_checkboxes(self, all_checkbox, checkboxes):
+        """「全フィールド検索」チェックボックスが選択された時、他のチェックボックスを無効化する"""
+        try:
+            is_checked = all_checkbox.isChecked()
+            # 「全フィールド検索」以外のチェックボックスを全て無効化/有効化
+            for field_name, checkbox in checkboxes.items():
+                if field_name != "全フィールド検索":
+                    if is_checked:
+                        # 「全フィールド検索」がチェックされたら他のチェックを外して無効化
+                        checkbox.setChecked(False)
+                        checkbox.setEnabled(False)
+                    else:
+                        # 「全フィールド検索」のチェックが外れたら他のを有効化
+                        checkbox.setEnabled(True)
+        except Exception as e:
+            print(f"_toggle_other_checkboxes error: {e}")
+    
+    def _uncheck_all_checkbox(self, field_checkbox, all_checkbox):
+        """個別のフィールドチェックボックスがチェックされた時、「全フィールド検索」のチェックを外す"""
+        try:
+            if field_checkbox.isChecked() and all_checkbox and all_checkbox.isChecked():
+                # シグナルの再帰を防ぐためにブロックしてから状態変更
+                all_checkbox.blockSignals(True)
+                all_checkbox.setChecked(False)
+                all_checkbox.blockSignals(False)
+        except Exception as e:
+            print(f"_uncheck_all_checkbox error: {e}")
     
     def _save_view_fields(self, checkboxes, dialog, callback):
         """チェックされたフィールドを保存する"""
