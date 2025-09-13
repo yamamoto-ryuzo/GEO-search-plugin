@@ -692,10 +692,11 @@ class SearchDialog(QDialog):
             
             view_fields_layout = QHBoxLayout()
             
-            # 現在の表示フィールドを表示
+            # 現在の表示フィールドを表示（編集可能）
             view_fields_text = QTextEdit(edit_dialog)
+            view_fields_text.setObjectName("view_fields_text")  # オブジェクト名を設定
             view_fields_text.setFont(self.get_monospace_font())
-            view_fields_text.setReadOnly(True)
+            view_fields_text.setReadOnly(False)  # 編集可能に変更
             view_fields_text.setMinimumHeight(80)
             
             # フィールド情報を取得
@@ -719,8 +720,9 @@ class SearchDialog(QDialog):
             
             # ボタンクリック時の処理
             def on_view_fields_edited(new_fields):
+                # テキスト編集フィールドと一時保存の両方を更新
                 view_fields_text.setText(json.dumps(new_fields, indent=2, ensure_ascii=False))
-                tab_config["_ViewFields"] = new_fields  # 一時的な保存
+                tab_config["_ViewFields"] = new_fields  # バックアップとして一時的に保存
             
             view_fields_button.clicked.connect(
                 lambda: self.edit_view_fields(
@@ -965,9 +967,24 @@ class SearchDialog(QDialog):
                     f"タイトルは自動的に '{tab_title}' に設定されます。タブ名を変更するには、新しいタブを作成してください。")
                 tab_config["Title"] = tab_title
                 
-            # _ViewFieldsからViewFieldsに値を移し替え
-            if "_ViewFields" in readonly_fields:
-                tab_config["ViewFields"] = readonly_fields["_ViewFields"]
+            # ViewFieldsをテキストエディタから取得
+            try:
+                view_fields_text = dialog.findChild(QTextEdit, "view_fields_text")
+                if view_fields_text:
+                    view_fields_str = view_fields_text.toPlainText()
+                    try:
+                        # JSONとして解析
+                        view_fields_value = json.loads(view_fields_str)
+                        tab_config["ViewFields"] = view_fields_value
+                    except Exception as e:
+                        error_messages.append(f"フィールド 'ViewFields' のJSONエラー: {str(e)}")
+                # バックアップとして、_ViewFieldsからViewFieldsに値を移し替え
+                elif "_ViewFields" in readonly_fields:
+                    tab_config["ViewFields"] = readonly_fields["_ViewFields"]
+            except Exception as err:
+                # 例外が発生した場合は、_ViewFieldsからViewFieldsに値を移し替え
+                if "_ViewFields" in readonly_fields:
+                    tab_config["ViewFields"] = readonly_fields["_ViewFields"]
             
             # 設定を保存
             self._update_config_and_save(tab_config, dialog, all_configs, tab_index)
