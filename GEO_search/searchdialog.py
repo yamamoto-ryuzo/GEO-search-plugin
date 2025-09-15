@@ -1349,12 +1349,8 @@ class SearchDialog(QDialog):
                 QMessageBox.warning(self, "JSONエラー", "\n".join(error_messages))
                 return
                 
-            # タイトルを確認
-            if "Title" in tab_config and tab_config["Title"] != tab_title:
-                # 警告を表示してタイトルを修正
-                QMessageBox.information(self, "タイトルの調整", 
-                    f"タイトルは自動的に '{tab_title}' に設定されます。タブ名を変更するには、新しいタブを作成してください。")
-                tab_config["Title"] = tab_title
+            # ユーザーが入力したタイトルをそのまま使用する
+            # (タイトル変更を許可するため、タイトル修正の処理を削除)
                 
             # ViewFieldsはすでに編集可能フィールドとして処理されているため、
             # 特別な処理は必要ありません
@@ -1377,9 +1373,8 @@ class SearchDialog(QDialog):
             try:
                 tab_config = json.loads(text)
                 
-                # タブ名を一貫させるために、タイトルを現在のタブ名に設定
-                if "Title" in tab_config and tab_config["Title"] != tab_title:
-                    tab_config["Title"] = tab_title
+                # ユーザーが入力したタイトルをそのまま使用する
+                # (タイトル変更を許可するため、タイトル修正の処理を削除)
                     
             except Exception as e:
                 QMessageBox.warning(self, "JSONエラー", f"入力されたテキストはJSONとして有効ではありません:\n{str(e)}")
