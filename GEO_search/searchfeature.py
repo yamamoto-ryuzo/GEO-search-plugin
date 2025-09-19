@@ -364,7 +364,39 @@ class SearchFeature(object):
             return
 
     def show_features(self):
+        # 呼び出し確認用: ダイアログで通知
+        try:
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.information(None, "show_features", "show_features called", QMessageBox.Ok)
+        except Exception:
+            pass
         """検索結果を表示する"""
+        # マップテーマ（Map Theme）APIでテーマ一覧取得・切り替え
+        try:
+            from qgis.core import QgsMessageLog, QgsProject
+            project = QgsProject.instance()
+            theme_collection = project.mapThemeCollection()
+            themes = theme_collection.mapThemes()
+            msg = f"Map themes: {themes}"
+            QgsMessageLog.logMessage(msg, "GEO-search-plugin", 0)
+            if "テーマ" in themes:
+                root = project.layerTreeRoot()
+                # iface取得のためにself.ifaceを参照（なければmodel=Noneで）
+                model = getattr(self, 'iface', None)
+                if model and hasattr(model, 'layerTreeView'):
+                    model = model.layerTreeView().layerTreeModel()
+                else:
+                    model = None
+                theme_collection.applyTheme("テーマ", root, model)
+                QgsMessageLog.logMessage("Map theme 'テーマ' applied.", "GEO-search-plugin", 0)
+            else:
+                QgsMessageLog.logMessage("Map theme 'テーマ' not found.", "GEO-search-plugin", 1)
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"マップテーマAPIエラー: {str(e)}", "GEO-search-plugin", 2)
+            except Exception:
+                pass
         if not self.layer:
             return
         features = self.search_feature()
@@ -375,6 +407,14 @@ class SearchFeature(object):
             # fallback to legacy single-table API
             self.result_dialog.set_features(self.view_fields, features)
         self.result_dialog.show()
+
+        # 検索後にレイヤテーマ"test"へ切り替え（後処理）
+        try:
+            from qgis.PyQt.QtWidgets import QApplication
+            QgsProject.instance().layerTreeRoot().readLayerVisibilityPreset("test")
+            QApplication.processEvents()
+        except Exception:
+            pass
 
     def get_visible_vector_layers(self):
         """現在マップ上で表示されているベクタレイヤ一覧を返す"""
