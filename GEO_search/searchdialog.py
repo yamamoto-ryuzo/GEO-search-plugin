@@ -981,10 +981,7 @@ class SearchDialog(QDialog):
             # 保存ボタン
             save_button = QPushButton("保存", edit_dialog)
             def save_and_close():
-                # selectThemeの値をtab_configに反映（QComboBox対応）
-                select_theme_editor = editors.get("selectTheme")
-                if select_theme_editor:
-                    tab_config["selectTheme"] = select_theme_editor.currentText().strip()
+                # すべてのエディタの内容をtab_configに反映し保存（selectThemeも含む）
                 self.save_tab_config_by_fields(
                     editors,
                     readonly_fields,
