@@ -7,7 +7,7 @@ import json
 import os
 
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QMessageBox
+from qgis.PyQt.QtWidgets import QAction, QMessageBox, QComboBox
 from qgis.core import (
     QgsProject,
     QgsExpressionContextUtils,
@@ -74,21 +74,93 @@ class plugin(object):
         self.action.setObjectName("地図検索")
         self.iface.addToolBarIcon(self.action)
         self.iface.addPluginToMenu("地図検索", self.action)
+        
+        # テーマ一覧のドロップダウンを作成
+        self.theme_combobox = QComboBox()
+        self.theme_combobox.setToolTip("マップテーマを選択")
+        self.theme_combobox.setMinimumWidth(150)
+        self.iface.addToolBarWidget(self.theme_combobox)
+        self.update_theme_combobox()
+        
+        # テーマ選択時のイベント接続
+        self.theme_combobox.currentIndexChanged.connect(self.apply_selected_theme)
 
         # トリガー構築
         self.action.triggered.connect(self.run)
         self.iface.projectRead.connect(self.create_search_dialog)
+        self.iface.projectRead.connect(self.update_theme_combobox)
         
         # プロジェクト変数の変更を検知するために追加のイベント接続
         try:
             QgsProject.instance().projectSaved.connect(self.on_project_saved)
+            QgsProject.instance().projectSaved.connect(self.update_theme_combobox)
         except Exception:
             pass
 
+    def update_theme_combobox(self):
+        """マップテーマのコンボボックスを更新する"""
+        try:
+            from qgis.core import QgsProject
+            project = QgsProject.instance()
+            theme_collection = project.mapThemeCollection()
+            themes = theme_collection.mapThemes()
+            
+            # コンボボックスをクリア
+            self.theme_combobox.blockSignals(True)
+            self.theme_combobox.clear()
+            
+            # 「テーマ選択」というプレースホルダーを追加
+            self.theme_combobox.addItem("テーマ選択")
+            
+            # マップテーマを追加
+            for theme in themes:
+                self.theme_combobox.addItem(theme)
+                
+            self.theme_combobox.blockSignals(False)
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"テーマコンボボックスの更新エラー: {str(e)}", "GEO-search-plugin", 2)
+            except Exception:
+                pass
+    
+    def apply_selected_theme(self, index):
+        """選択されたテーマを適用する"""
+        if index <= 0:  # プレースホルダー「テーマ選択」の場合は何もしない
+            return
+            
+        try:
+            from qgis.core import QgsProject, QgsMessageLog
+            project = QgsProject.instance()
+            theme_collection = project.mapThemeCollection()
+            theme_name = self.theme_combobox.currentText()
+            
+            # テーマを適用
+            root = project.layerTreeRoot()
+            model = self.iface.layerTreeView().layerTreeModel()
+            theme_collection.applyTheme(theme_name, root, model)
+            QgsMessageLog.logMessage(f"テーマ '{theme_name}' を適用しました", "GEO-search-plugin", 0)
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"テーマ適用エラー: {str(e)}", "GEO-search-plugin", 2)
+            except Exception:
+                pass
+    
     def unload(self):
-        # プラグイン終了時に動作
-        self.iface.removeToolBarIcon(self.action)
-        self.iface.removePluginMenu("地図検索", self.action)
+        # プラグイン終了時に動作（例外処理を追加）
+        try:
+            self.iface.removeToolBarIcon(self.action)
+            self.iface.removePluginMenu("地図検索", self.action)
+        except:
+            pass
+            
+        # コンボボックスの削除も例外処理
+        try:
+            if hasattr(self, 'theme_combobox'):
+                self.theme_combobox.deleteLater()
+        except:
+            pass
 
     def create_search_dialog(self):
         # メッセージ表示
