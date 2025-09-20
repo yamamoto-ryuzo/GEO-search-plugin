@@ -1,6 +1,7 @@
 
 # 地図検索
-　
+　<img width="213" height="35" alt="image" src="https://github.com/user-attachments/assets/8010fdf0-5e57-4215-8b3a-6dcd3e61fc9f" />
+
 最終的には https://github.com/NationalSecurityAgency/qgis-searchlayers-plugin と統合したい  
 ### UI設定画面(プロジェクトファイルに設定されます)  
 <img width="698" height="741" alt="image" src="https://github.com/user-attachments/assets/a942f8ae-09b7-49b2-a4e3-53d9e712b877" />
@@ -344,6 +345,7 @@ QGISで読み込んでいるレイヤを検索対象とする。
 | SampleFields | 未使用 | list[str] |
 | SampleTableLimit | 未使用 | list[str] |
 | selectTheme | 検索時に適用するQGISマップテーマ名。指定しない場合はテーマ切替なし | str (optional) |
+
 
 
 
