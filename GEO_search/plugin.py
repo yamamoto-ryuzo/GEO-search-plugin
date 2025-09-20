@@ -255,6 +255,32 @@ class plugin(object):
         except Exception:
             pass
             
+        # 現在の表示状態をテーマとして保存する
+        try:
+            from qgis.core import QgsProject, QgsMessageLog
+            project = QgsProject.instance()
+            theme_collection = project.mapThemeCollection()
+            
+            # シンプルなテーマ名
+            theme_name = "検索前"
+            
+            # レイヤーツリーを取得
+            root = project.layerTreeRoot()
+            
+            # 最初に既存の同名テーマを削除（あれば）
+            if theme_name in theme_collection.mapThemes():
+                theme_collection.removeMapTheme(theme_name)
+            
+            # レイヤーツリーモデルを取得してテーマを作成
+            model = self.iface.layerTreeView().layerTreeModel()
+            theme_state = theme_collection.createThemeFromCurrentState(root, model)
+            theme_collection.insert(theme_name, theme_state)
+            QgsMessageLog.logMessage(f"テーマ「{theme_name}」を保存しました", "GEO-search-plugin", 0)
+            
+        except Exception as e:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"テーマ保存エラー: {str(e)}", "GEO-search-plugin", 2)
+            
         self.dialog.show()
 
     def change_tab_group(self, index):

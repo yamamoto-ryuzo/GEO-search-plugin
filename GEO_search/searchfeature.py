@@ -364,12 +364,6 @@ class SearchFeature(object):
             return
 
     def show_features(self):
-        # 呼び出し確認用: ダイアログで通知
-        try:
-            from qgis.PyQt.QtWidgets import QMessageBox
-            QMessageBox.information(None, "show_features", "show_features called", QMessageBox.Ok)
-        except Exception:
-            pass
         """検索結果を表示する"""
         # マップテーマ（Map Theme）APIでテーマ一覧取得・切り替え
         try:
@@ -377,22 +371,32 @@ class SearchFeature(object):
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
             themes = theme_collection.mapThemes()
-            msg = f"Map themes: {themes}"
-            QgsMessageLog.logMessage(msg, "GEO-search-plugin", 0)
             # JSON設定からテーマ名を取得（なければNone）
             theme_name = self.setting.get("selectTheme")
+            
+            # 適用するテーマ名を決定
+            apply_theme_name = None
             if theme_name and theme_name in themes:
+                # 設定で指定されたテーマを使用
+                apply_theme_name = theme_name
+            elif "検索前" in themes:
+                # 「検索前」テーマを使用
+                apply_theme_name = "検索前"
+            
+            # テーマを適用
+            if apply_theme_name:
                 root = project.layerTreeRoot()
-                # iface取得のためにself.ifaceを参照（なければmodel=Noneで）
-                model = getattr(self, 'iface', None)
-                if model and hasattr(model, 'layerTreeView'):
-                    model = model.layerTreeView().layerTreeModel()
-                else:
-                    model = None
-                theme_collection.applyTheme(theme_name, root, model)
-                QgsMessageLog.logMessage(f"Map theme '{theme_name}' applied.", "GEO-search-plugin", 0)
+                model = self.iface.layerTreeView().layerTreeModel()
+                theme_collection.applyTheme(apply_theme_name, root, model)
+                QgsMessageLog.logMessage(f"テーマ '{apply_theme_name}' を適用しました", "GEO-search-plugin", 0)
             elif theme_name:
-                QgsMessageLog.logMessage(f"Map theme '{theme_name}' not found.", "GEO-search-plugin", 1)
+                QgsMessageLog.logMessage(f"テーマ '{theme_name}' が見つかりません", "GEO-search-plugin", 1)
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"テーマ適用エラー: {str(e)}", "GEO-search-plugin", 2)
+            except Exception:
+                pass
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog
