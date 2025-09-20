@@ -4,7 +4,7 @@
 
 最終的には https://github.com/NationalSecurityAgency/qgis-searchlayers-plugin と統合したい  
 ### UI設定画面(プロジェクトファイルに設定されます)  
-<img width="698" height="741" alt="image" src="https://github.com/user-attachments/assets/a942f8ae-09b7-49b2-a4e3-53d9e712b877" />
+<img width="686" height="740" alt="image" src="https://github.com/user-attachments/assets/27cad15f-890f-4bfc-9c61-3660531e7c32" />
 
 ### 地番検索  
 ![image](https://user-images.githubusercontent.com/86514652/183770100-a385fad3-bc25-47f8-919c-659554c1f7e3.png)  
@@ -345,6 +345,7 @@ QGISで読み込んでいるレイヤを検索対象とする。
 | SampleFields | 未使用 | list[str] |
 | SampleTableLimit | 未使用 | list[str] |
 | selectTheme | 検索時に適用するQGISマップテーマ名。指定しない場合はテーマ切替なし | str (optional) |
+
 
 
 
