@@ -77,33 +77,64 @@ class plugin(object):
         
         # テーマ一覧のドロップダウンを作成
         self.theme_combobox = QComboBox()
-        self.theme_combobox.setToolTip("マップテーマを選択")
-        self.theme_combobox.setMinimumWidth(150)
+        self.theme_combobox.setToolTip("レイヤの表示/非表示を設定するマップテーマを選択（「テーマ選択」で基本表示に戻す）")
+        self.theme_combobox.setMinimumWidth(180)
         self.iface.addToolBarWidget(self.theme_combobox)
         self.update_theme_combobox()
         
+        # コンボボックスの前回の選択値を保存する変数
+        self._last_theme_selected = None
+        
         # テーマ選択時のイベント接続
+        # currentIndexChangedは値が実際に変わった時だけ発火
         self.theme_combobox.currentIndexChanged.connect(self.apply_selected_theme)
+        
+        # activatedシグナルはクリックやキー操作で選択した時に必ず発火（同じ項目を選んだ場合も）
+        try:
+            self.theme_combobox.activated.connect(self.apply_selected_theme)
+        except Exception:
+            pass
 
         # トリガー構築
         self.action.triggered.connect(self.run)
         self.iface.projectRead.connect(self.create_search_dialog)
         self.iface.projectRead.connect(self.update_theme_combobox)
         
-        # プロジェクト変数の変更を検知するために追加のイベント接続
+        # プロジェクト変数とテーマ変更を検知するための接続
         try:
+            # プロジェクト保存時
             QgsProject.instance().projectSaved.connect(self.on_project_saved)
             QgsProject.instance().projectSaved.connect(self.update_theme_combobox)
-        except Exception:
-            pass
+            
+            # テーマコレクションの変更を検知（重要：テーマが追加/削除された時に自動更新）
+            project = QgsProject.instance()
+            theme_collection = project.mapThemeCollection()
+            # mapThemesChangedシグナルがQGISのバージョンにより異なる可能性があるため複数の接続方法を試みる
+            try:
+                theme_collection.mapThemesChanged.connect(self.update_theme_combobox)
+            except:
+                # 古いバージョン向けの代替手段
+                try:
+                    theme_collection.changed.connect(self.update_theme_combobox)
+                except:
+                    pass
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"テーマ監視エラー: {str(e)}", "GEO-search-plugin", 2)
+            except:
+                pass
 
     def update_theme_combobox(self):
         """マップテーマのコンボボックスを更新する"""
         try:
-            from qgis.core import QgsProject
+            from qgis.core import QgsProject, QgsMessageLog
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
             themes = theme_collection.mapThemes()
+            
+            # 現在選択されているテーマを保存
+            current_theme = self.theme_combobox.currentText()
             
             # コンボボックスをクリア
             self.theme_combobox.blockSignals(True)
@@ -115,6 +146,21 @@ class plugin(object):
             # マップテーマを追加
             for theme in themes:
                 self.theme_combobox.addItem(theme)
+            
+            # 前回選択されていたテーマがまだ存在するなら、それを選択状態に
+            if current_theme in themes:
+                index = self.theme_combobox.findText(current_theme)
+                if index >= 0:
+                    self.theme_combobox.setCurrentIndex(index)
+            # 内部に記録された前回選択があれば、それを優先
+            elif hasattr(self, '_last_theme_selected') and self._last_theme_selected:
+                if self._last_theme_selected in themes:
+                    index = self.theme_combobox.findText(self._last_theme_selected)
+                    if index >= 0:
+                        self.theme_combobox.setCurrentIndex(index)
+            
+            # デバッグログ
+            QgsMessageLog.logMessage(f"テーマリスト更新: {', '.join(themes)}", "GEO-search-plugin", 0)
                 
             self.theme_combobox.blockSignals(False)
         except Exception as e:
@@ -124,21 +170,37 @@ class plugin(object):
             except Exception:
                 pass
     
+
+    
     def apply_selected_theme(self, index):
         """選択されたテーマを適用する"""
-        if index <= 0:  # プレースホルダー「テーマ選択」の場合は何もしない
-            return
-            
         try:
             from qgis.core import QgsProject, QgsMessageLog
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
-            theme_name = self.theme_combobox.currentText()
             
-            # テーマを適用
+            # 現在のテーマテキストを取得
+            current_theme_text = self.theme_combobox.currentText()
+            
+            # 「テーマ選択」の場合は何もしない
+            if current_theme_text == "テーマ選択" or index <= 0:
+                QgsMessageLog.logMessage("テーマ選択のため、適用しませんでした", "GEO-search-plugin", 0)
+                # 選択を記録
+                self._last_theme_selected = current_theme_text
+                return
+                
+            # 選択されたテーマを適用
+            theme_name = current_theme_text
+            
+            # 同じテーマを再選択した場合も適用する
+            # (前回と同じ選択でも強制的にテーマを適用)
             root = project.layerTreeRoot()
             model = self.iface.layerTreeView().layerTreeModel()
             theme_collection.applyTheme(theme_name, root, model)
+            
+            # 今回の選択を記録
+            self._last_theme_selected = current_theme_text
+            
             QgsMessageLog.logMessage(f"テーマ '{theme_name}' を適用しました", "GEO-search-plugin", 0)
         except Exception as e:
             try:
@@ -159,6 +221,7 @@ class plugin(object):
         try:
             if hasattr(self, 'theme_combobox'):
                 self.theme_combobox.deleteLater()
+                self.theme_combobox = None
         except:
             pass
 
@@ -380,6 +443,10 @@ class plugin(object):
         self.dialog.searchButton.clicked.connect(self.current_feature.show_features)
         self.dialog.searchButton.setEnabled(self.current_feature.widget.isEnabled())
         
+    # 以前のイベントフィルタ関連メソッドは不要になったため削除
+    # activatedシグナルが同じ項目選択も検出するため、これらのメソッドは不要
+    # eventFilter, force_apply_current_theme, _force_apply_themeは削除
+    
     def on_project_saved(self):
         """プロジェクトが保存された時の処理"""
         try:
