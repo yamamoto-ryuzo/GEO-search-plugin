@@ -792,7 +792,12 @@ class SearchDialog(QDialog):
                 tab_config["_ViewFields"] = []
 
             # selectTheme（マップテーマ名）も編集可能に追加
-            editable_fields["selectTheme"] = tab_config.get("selectTheme", "")
+            # selectTheme（マップテーマ名）も編集可能に追加（既存テーマ一覧から選択可能にするためQComboBoxを使う）
+            if "selectTheme" in tab_config:
+                editable_fields["selectTheme"] = tab_config["selectTheme"]
+            else:
+                editable_fields["selectTheme"] = ""
+            
             for key, value in tab_config.items():
                 if key not in ["group", "Title", "SearchField", "ViewFields"]:
                     readonly_fields[key] = value
@@ -808,11 +813,24 @@ class SearchDialog(QDialog):
                 grid_layout.addWidget(label, row, 0)
 
                 if field_name == "selectTheme":
-                    # selectThemeはQLineEditで編集
-                    from qgis.PyQt.QtWidgets import QLineEdit
-                    editor = QLineEdit(edit_dialog)
+                    # selectThemeはQComboBoxで既存テーマ一覧から選択
+                    from qgis.PyQt.QtWidgets import QComboBox
+                    from qgis.core import QgsProject
+                    editor = QComboBox(edit_dialog)
                     editor.setObjectName(f"{field_name}_editor")
-                    editor.setText(str(field_value) if field_value is not None else "")
+                    # マップテーマ一覧を取得
+                    try:
+                        project = QgsProject.instance()
+                        theme_collection = project.mapThemeCollection()
+                        themes = theme_collection.mapThemes() if theme_collection else []
+                    except Exception:
+                        themes = []
+                    editor.addItem("")  # 空選択肢
+                    for theme in themes:
+                        editor.addItem(theme)
+                    # 初期値をセット
+                    if field_value and field_value in [editor.itemText(i) for i in range(editor.count())]:
+                        editor.setCurrentText(field_value)
                     grid_layout.addWidget(editor, row, 1)
                     editors[field_name] = editor
                 else:
@@ -963,10 +981,10 @@ class SearchDialog(QDialog):
             # 保存ボタン
             save_button = QPushButton("保存", edit_dialog)
             def save_and_close():
-                # selectThemeの値をtab_configに反映
+                # selectThemeの値をtab_configに反映（QComboBox対応）
                 select_theme_editor = editors.get("selectTheme")
                 if select_theme_editor:
-                    tab_config["selectTheme"] = select_theme_editor.text().strip()
+                    tab_config["selectTheme"] = select_theme_editor.currentText().strip()
                 self.save_tab_config_by_fields(
                     editors,
                     readonly_fields,
@@ -1349,8 +1367,11 @@ class SearchDialog(QDialog):
             error_messages = []
             for field_name, editor in editors.items():
                 if field_name == "selectTheme":
-                    # QLineEditの場合
-                    tab_config[field_name] = editor.text().strip()
+                    # QComboBoxまたはQLineEdit対応
+                    if hasattr(editor, "currentText"):
+                        tab_config[field_name] = editor.currentText().strip()
+                    else:
+                        tab_config[field_name] = editor.text().strip()
                 else:
                     text = editor.toPlainText()
                     try:
