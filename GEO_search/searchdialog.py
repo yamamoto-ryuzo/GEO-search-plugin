@@ -782,15 +782,17 @@ class SearchDialog(QDialog):
                 editable_fields["SearchField"] = tab_config["SearchField"]
             else:
                 editable_fields["SearchField"] = {}
-                
+
             # 表示フィールド (ViewFields) - 編集可能に変更
             if "ViewFields" in tab_config:
                 editable_fields["ViewFields"] = tab_config["ViewFields"]
-                # バックアップとしても保存
                 tab_config["_ViewFields"] = tab_config["ViewFields"]
             else:
                 editable_fields["ViewFields"] = []
-                tab_config["_ViewFields"] = []            # その他の読み取り専用フィールド
+                tab_config["_ViewFields"] = []
+
+            # selectTheme（マップテーマ名）も編集可能に追加
+            editable_fields["selectTheme"] = tab_config.get("selectTheme", "")
             for key, value in tab_config.items():
                 if key not in ["group", "Title", "SearchField", "ViewFields"]:
                     readonly_fields[key] = value
@@ -801,24 +803,28 @@ class SearchDialog(QDialog):
             # 編集可能フィールドの設定
             row = 0
             for field_name, field_value in editable_fields.items():
-                # ラベル
                 label = QLabel(f"{field_name}:", edit_dialog)
                 label.setStyleSheet("font-weight: bold;")
                 grid_layout.addWidget(label, row, 0)
-                
-                # エディタ
-                editor = QTextEdit(edit_dialog)
-                editor.setObjectName(f"{field_name}_editor")  # オブジェクト名を設定
-                editor.setFont(self.get_monospace_font())
-                editor.setMinimumHeight(80)
-                
-                # フィールドの内容をJSONとして表示
-                json_str = json.dumps(field_value, indent=2, ensure_ascii=False)
-                editor.setText(json_str)
-                
-                grid_layout.addWidget(editor, row, 1)
-                editors[field_name] = editor
-                
+
+                if field_name == "selectTheme":
+                    # selectThemeはQLineEditで編集
+                    from qgis.PyQt.QtWidgets import QLineEdit
+                    editor = QLineEdit(edit_dialog)
+                    editor.setObjectName(f"{field_name}_editor")
+                    editor.setText(str(field_value) if field_value is not None else "")
+                    grid_layout.addWidget(editor, row, 1)
+                    editors[field_name] = editor
+                else:
+                    # 既存のTQextEditエディタ
+                    editor = QTextEdit(edit_dialog)
+                    editor.setObjectName(f"{field_name}_editor")
+                    editor.setFont(self.get_monospace_font())
+                    editor.setMinimumHeight(80)
+                    json_str = json.dumps(field_value, indent=2, ensure_ascii=False)
+                    editor.setText(json_str)
+                    grid_layout.addWidget(editor, row, 1)
+                    editors[field_name] = editor
                 row += 1
                 
             # レイヤー名を取得
@@ -956,14 +962,20 @@ class SearchDialog(QDialog):
             
             # 保存ボタン
             save_button = QPushButton("保存", edit_dialog)
-            save_button.clicked.connect(lambda: self.save_tab_config_by_fields(
-                editors,
-                readonly_fields,
-                edit_dialog, 
-                all_configs, 
-                tab_index_in_config, 
-                current_tab_title
-            ))
+            def save_and_close():
+                # selectThemeの値をtab_configに反映
+                select_theme_editor = editors.get("selectTheme")
+                if select_theme_editor:
+                    tab_config["selectTheme"] = select_theme_editor.text().strip()
+                self.save_tab_config_by_fields(
+                    editors,
+                    readonly_fields,
+                    edit_dialog, 
+                    all_configs, 
+                    tab_index_in_config, 
+                    current_tab_title
+                )
+            save_button.clicked.connect(save_and_close)
             button_layout.addWidget(save_button)
             
             # キャンセルボタン
@@ -1336,13 +1348,17 @@ class SearchDialog(QDialog):
             # 編集可能フィールドを処理
             error_messages = []
             for field_name, editor in editors.items():
-                text = editor.toPlainText()
-                try:
-                    # JSONとして解析
-                    field_value = json.loads(text)
-                    tab_config[field_name] = field_value
-                except Exception as e:
-                    error_messages.append(f"フィールド '{field_name}' のJSONエラー: {str(e)}")
+                if field_name == "selectTheme":
+                    # QLineEditの場合
+                    tab_config[field_name] = editor.text().strip()
+                else:
+                    text = editor.toPlainText()
+                    try:
+                        # JSONとして解析
+                        field_value = json.loads(text)
+                        tab_config[field_name] = field_value
+                    except Exception as e:
+                        error_messages.append(f"フィールド '{field_name}' のJSONエラー: {str(e)}")
             
             # エラーがあれば表示して終了
             if error_messages:

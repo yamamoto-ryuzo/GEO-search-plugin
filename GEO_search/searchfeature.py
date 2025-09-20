@@ -379,7 +379,9 @@ class SearchFeature(object):
             themes = theme_collection.mapThemes()
             msg = f"Map themes: {themes}"
             QgsMessageLog.logMessage(msg, "GEO-search-plugin", 0)
-            if "テーマ" in themes:
+            # JSON設定からテーマ名を取得（なければNone）
+            theme_name = self.setting.get("selectTheme")
+            if theme_name and theme_name in themes:
                 root = project.layerTreeRoot()
                 # iface取得のためにself.ifaceを参照（なければmodel=Noneで）
                 model = getattr(self, 'iface', None)
@@ -387,10 +389,10 @@ class SearchFeature(object):
                     model = model.layerTreeView().layerTreeModel()
                 else:
                     model = None
-                theme_collection.applyTheme("テーマ", root, model)
-                QgsMessageLog.logMessage("Map theme 'テーマ' applied.", "GEO-search-plugin", 0)
-            else:
-                QgsMessageLog.logMessage("Map theme 'テーマ' not found.", "GEO-search-plugin", 1)
+                theme_collection.applyTheme(theme_name, root, model)
+                QgsMessageLog.logMessage(f"Map theme '{theme_name}' applied.", "GEO-search-plugin", 0)
+            elif theme_name:
+                QgsMessageLog.logMessage(f"Map theme '{theme_name}' not found.", "GEO-search-plugin", 1)
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog
