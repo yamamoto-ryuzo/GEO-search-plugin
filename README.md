@@ -347,6 +347,32 @@ QGISで読み込んでいるレイヤを検索対象とする。
 | selectTheme | 検索時に適用するQGISマップテーマ名。指定しない場合はテーマ切替なし | str (optional) |
 
 
+**検索ロジック（実装概要）**
+
+- **通常検索（全文検索風）:**
+  - 実装ファイル: `GEO_search/widget/searchwidget.py` (`SearchTextWidget`) と `GEO_search/searchfeature.py` (`SearchTextFeature`).
+  - 動作: 検索ボックスに入力された最初の非空値を取得し、設定された検索フィールド（`SearchField` または `SearchFields`）に対して SQL の LIKE 相当の条件を組み立てます。複数フィールドは OR/AND（設定に依存）で結合され、QGIS の `QgsExpression` を用いて `QgsFeatureRequest` に渡して検索します。
+  - 正規化: `SearchFeature.normalize_search_value` により全角英数字を半角に変換します。
+
+- **地番検索（地籍検索）:**
+  - 実装ファイル: `GEO_search/widget/searchwidget.py` (`SearchTibanWidget`) と `GEO_search/searchfeature.py` (`SearchTibanFeature`).
+  - 動作: 地番用の入力を受け取り、地番属性（`TibanField`）に対する正規表現マッチや、個別フィールドに対する完全一致／あいまい（近傍番号）検索をサポートします。あいまい検索では数値幅（FUZZY）を用いた幅のあるヒットを生成します。地番フィールドは正規表現（`regexp_match`）でマッチングされます。
+  - 補助機能: 字コード（`AzaTable`）を読み込んで候補をテーブル表示し、選択で入力欄にセットします。
+
+- **所有者検索（氏名検索）:**
+  - 実装ファイル: `GEO_search/widget/searchwidget.py` (`SearchOwnerWidget`) と `GEO_search/searchfeature.py` (`SearchOwnerFeature`).
+  - 動作: 複数フィールドをチェックボタンで選択して検索できます。全角カナ→半角カナや濁音／拗音の変換処理を行い、`replace(... ) LIKE '{value}'` のような式で空白除去やカナ正規化を行った比較を実行します。前方一致／部分一致の切替もサポートします。
+
+- **表示レイヤ検索／全レイヤ検索:**
+  - `SearchTextFeature.show_features` ではタブタイトルが `表示レイヤ` または `全レイヤ` の場合、現在表示されているレイヤ／プロジェクト内全レイヤを横断して検索を行い、結果をレイヤごとのタブで表示します。
+
+- **補助機能:**
+  - サジェスト（補完）機能: `unique_values` を使い `QCompleter` を生成して補完候補を表示します（`Suggest` フラグで有効化）。
+  - マップテーマ適用: 検索実行時に `selectTheme` に設定されたマップテーマを適用します（`検索前` という自動保存テーマも利用可能）。
+
+詳細な実装は上記のファイルを参照してください。必要なら README にコードスニペットや使用例を追記します。
+
+
 
 
 
