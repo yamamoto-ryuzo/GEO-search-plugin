@@ -548,16 +548,39 @@ class SearchTextFeature(SearchFeature):
                 pass
             return []
         
-        # 検索条件を構築
+        # 検索条件を構築（フィールドタイプを確認して数値なら数値比較にする）
         expres_list = []
-        for field_name in target_fields:
-            expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=search_value))
-        
+        # build a map of field types for quick lookup
+        field_types = {f.name(): f.type() for f in layer.fields()}
         try:
-            QgsMessageLog.logMessage(f"search_feature: search with fields={target_fields}, value={search_value}", "GEO-search-plugin", 0)
-            QgsMessageLog.logMessage(f"検索式: expres_list={expres_list}", "GEO-search-plugin", 0)
+            QgsMessageLog.logMessage(f"field_types_sample={dict(list(field_types.items())[:10])}", "GEO-search-plugin", 0)
         except Exception:
             pass
+        for field_name in target_fields:
+            ftype = field_types.get(field_name)
+            # QGIS field type for string is 10 (QString) in older API; numeric types vary.
+            # If the search_value looks numeric and the field type is numeric, compare as number.
+            is_numeric_field = ftype is not None and ftype not in (10,)
+            # try to coerce search_value to number when appropriate
+            if is_numeric_field:
+                try:
+                    # prefer integer when possible
+                    if str(search_value).isdigit():
+                        nv = int(search_value)
+                    else:
+                        nv = float(search_value)
+                    expres_list.append('"{field}" = {value}'.format(field=field_name, value=nv))
+                except Exception:
+                    # fallback to text comparison if conversion fails
+                    expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=search_value))
+            else:
+                expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=search_value))
+        
+            try:
+                QgsMessageLog.logMessage(f"search_feature: search with fields={target_fields}, value={search_value}", "GEO-search-plugin", 0)
+                QgsMessageLog.logMessage(f"検索式: expres_list={expres_list}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
         
         # クエリを実行
         expression_str = self.andor.join(expres_list)
@@ -589,11 +612,23 @@ class SearchTextFeature(SearchFeature):
             # 空dict（全フィールド検索）の場合は文字列フィールドを全て対象にする
             if field == {}:
                 if search_widget.text():  # 入力がある場合のみ
+                    val = self.normalize_search_value(search_widget.text())
+                    # 基本は文字列フィールドのみ
                     string_fields = [f.name() for f in self.layer.fields() if f.type() == 10]
                     target_fields.extend(string_fields)
+                    # 入力が数値なら数値フィールドも追加
+                    try:
+                        is_num = False
+                        if str(val).lstrip('-').replace('.', '', 1).isdigit():
+                            is_num = True
+                    except Exception:
+                        is_num = False
+                    if is_num:
+                        numeric_fields = [f.name() for f in self.layer.fields() if f.type() != 10]
+                        target_fields.extend(numeric_fields)
                     try:
                         from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"全フィールド検索: string_fields={string_fields}", "GEO-search-plugin", 0)
+                        QgsMessageLog.logMessage(f"全フィールド検索: string_fields={string_fields} numeric_included={is_num}", "GEO-search-plugin", 0)
                     except Exception:
                         pass
                 break
@@ -779,10 +814,23 @@ class SearchTextFeature(SearchFeature):
             if not target_fields:
                 return []
             
-            # 統一された検索条件構築ロジックを使用
+            # 統一された検索条件構築ロジックを使用（フィールドタイプに基づく比較）
             expres_list = []
+            field_types = {f.name(): f.type() for f in layer.fields()}
             for field_name in target_fields:
-                expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=search_value))
+                ftype = field_types.get(field_name)
+                is_numeric_field = ftype is not None and ftype not in (10,)
+                if is_numeric_field:
+                    try:
+                        if str(search_value).isdigit():
+                            nv = int(search_value)
+                        else:
+                            nv = float(search_value)
+                        expres_list.append('"{field}" = {value}'.format(field=field_name, value=nv))
+                    except Exception:
+                        expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=search_value))
+                else:
+                    expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=search_value))
             
             expression_str = self.andor.join(expres_list)
             expression = QgsExpression(expression_str)
@@ -822,8 +870,18 @@ class SearchTextFeature(SearchFeature):
             # 全フィールド検索の場合
             if field == {}:
                 if search_widget.text():
+                    val = self.normalize_search_value(search_widget.text())
                     string_fields = [f.name() for f in layer.fields() if f.type() == 10]
                     target_fields.extend(string_fields)
+                    try:
+                        is_num = False
+                        if str(val).lstrip('-').replace('.', '', 1).isdigit():
+                            is_num = True
+                    except Exception:
+                        is_num = False
+                    if is_num:
+                        numeric_fields = [f.name() for f in layer.fields() if f.type() != 10]
+                        target_fields.extend(numeric_fields)
                 break
             
             try:
