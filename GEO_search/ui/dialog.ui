@@ -14,6 +14,25 @@
    <string>CustomSearch</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
+   <item row="0" column="0" colspan="6">
+    <widget class="QTabWidget" name="tabWidget">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>1</horstretch>
+       <verstretch>1</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="minimumSize">
+      <size>
+       <width>400</width>
+       <height>150</height>
+      </size>
+     </property>
+     <property name="currentIndex">
+      <number>-1</number>
+     </property>
+    </widget>
+   </item>
    <item row="1" column="0" colspan="6">
     <widget class="QPushButton" name="searchButton">
      <property name="text">
@@ -22,6 +41,45 @@
     </widget>
    </item>
    <item row="2" column="0" colspan="6">
+    <widget class="QComboBox" name="panModeComboBox">
+     <item>
+      <property name="text">
+       <string>ズームして選択範囲にフィット</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>中心へパン（ズーム維持）</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>フィーチャ中心へパン</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>バウンディングボックスでフィット（マージン）</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>固定縮尺で表示</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>アニメーションパン</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>選択のみ（ビュー変更なし）</string>
+      </property>
+     </item>
+    </widget>
+   </item>
+   <item row="3" column="0" colspan="6">
     <widget class="QFrame" name="separator">
      <property name="frameShape">
       <enum>QFrame::HLine</enum>
@@ -31,7 +89,7 @@
      </property>
     </widget>
    </item>
-   <item row="3" column="0">
+   <item row="4" column="0">
     <spacer name="horizontalSpacer">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
@@ -44,28 +102,28 @@
      </property>
     </spacer>
    </item>
-   <item row="3" column="1">
-     <widget class="QPushButton" name="addLayerButton">
-      <property name="text">
-        <string>現在のレイヤを追加</string>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="2">
-     <widget class="QPushButton" name="removeTabButton">
-      <property name="text">
-        <string>選択したタブを削除</string>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="3">
-     <widget class="QPushButton" name="configButton">
-      <property name="text">
-        <string>設定編集</string>
-      </property>
-     </widget>
-    </item>
-   <item row="3" column="4">
+   <item row="4" column="1">
+    <widget class="QPushButton" name="addLayerButton">
+     <property name="text">
+      <string>現在のレイヤを追加</string>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="2">
+    <widget class="QPushButton" name="removeTabButton">
+     <property name="text">
+      <string>選択したタブを削除</string>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="3">
+    <widget class="QPushButton" name="configButton">
+     <property name="text">
+      <string>設定編集</string>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="4">
     <widget class="QPushButton" name="questionButton">
      <property name="sizePolicy">
       <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
@@ -84,25 +142,6 @@
      </property>
      <property name="text">
       <string>?</string>
-     </property>
-    </widget>
-   </item>
-   <item row="0" column="0" colspan="6">
-    <widget class="QTabWidget" name="tabWidget">
-     <property name="sizePolicy">
-      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-       <horstretch>1</horstretch>
-       <verstretch>1</verstretch>
-      </sizepolicy>
-     </property>
-     <property name="minimumSize">
-      <size>
-       <width>400</width>
-       <height>150</height>
-      </size>
-     </property>
-     <property name="currentIndex">
-      <number>-1</number>
      </property>
     </widget>
    </item>
