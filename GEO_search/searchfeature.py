@@ -804,6 +804,55 @@ class SearchFeature(object):
                 QgsMessageLog.logMessage(f"マップテーマAPIエラー: {str(e)}", "GEO-search-plugin", 2)
             except Exception:
                 pass
+        # テーマ適用後に、設定で角度が指定されていれば表示角度を変更する
+        try:
+            angle_val = None
+            try:
+                # setting may contain 'angle' as float or None
+                angle_val = self.setting.get("angle") if isinstance(self.setting, dict) else None
+            except Exception:
+                angle_val = None
+
+            if angle_val is not None:
+                try:
+                    rotation = float(angle_val)
+                    iface = getattr(self, 'iface', None)
+                    if iface is None and hasattr(self, 'parent') and callable(getattr(self, 'parent')):
+                        parent = self.parent()
+                        if parent is not None and hasattr(parent, 'iface'):
+                            iface = parent.iface
+                    if iface is not None:
+                        try:
+                            canvas = iface.mapCanvas()
+                            if hasattr(canvas, 'setRotation'):
+                                canvas.setRotation(rotation)
+                            else:
+                                # older API fallback
+                                try:
+                                    canvas.rotation = rotation
+                                except Exception:
+                                    pass
+                            try:
+                                from qgis.PyQt.QtWidgets import QApplication
+                                QApplication.processEvents()
+                            except Exception:
+                                pass
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage(f"表示角度を {rotation} 度に設定しました", "GEO-search-plugin", 0)
+                            except Exception:
+                                pass
+                        except Exception as e:
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage(f"キャンバス回転設定エラー: {e}", "GEO-search-plugin", 1)
+                            except Exception:
+                                pass
+                except Exception:
+                    # invalid angle value -> ignore
+                    pass
+        except Exception:
+            pass
         if not self.layer:
             return
         features = self.search_feature()

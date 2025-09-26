@@ -858,7 +858,7 @@ class SearchDialog(QDialog):
                     spin = QDoubleSpinBox(edit_dialog)
                     spin.setObjectName(f"{field_name}_editor")
                     spin.setRange(0.0, 360.0)
-                    spin.setSingleStep(0.1)
+                    spin.setSingleStep(5.0)
                     spin.setDecimals(2)
                     # checkbox: 指定しない -> NULL
                     chk = QCheckBox("指定しない (NULL)", edit_dialog)
@@ -1466,8 +1466,10 @@ class SearchDialog(QDialog):
                 elif field_name == "angle":
                     # editor may be a tuple (spin, checkbox) to support 'unspecified'
                     try:
-                        if isinstance(editor, tuple) and len(editor) == 2:
-                            spin_box, checkbox = editor
+                        # editor may be a tuple (spin, checkbox) or (spin, checkbox, button)
+                        if isinstance(editor, tuple) and len(editor) >= 2:
+                            spin_box = editor[0]
+                            checkbox = editor[1]
                             try:
                                 if checkbox.isChecked():
                                     tab_config[field_name] = None
