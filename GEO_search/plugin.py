@@ -375,6 +375,48 @@ class plugin(object):
                 self._current_group_widget = self.dialog.tabWidget
                 self.dialog.tabWidget.currentChanged.connect(self.change_search_feature)
 
+            # If panModeComboBox exists in the dialog UI, propagate its value to features
+            try:
+                cmb = getattr(self.dialog, 'panModeComboBox', None)
+                if cmb is not None:
+                    idx = cmb.currentIndex()
+                    # set initial pan_mode on all features (grouped or not)
+                    try:
+                        for f in self._search_features:
+                            setattr(f, 'pan_mode', idx)
+                    except Exception:
+                        pass
+                    try:
+                        for group, flist in self._search_group_features.items():
+                            for f in flist:
+                                setattr(f, 'pan_mode', idx)
+                    except Exception:
+                        pass
+
+                    # update function when combo changes
+                    def _on_pan_mode_changed(i):
+                        try:
+                            for f in self._search_features:
+                                setattr(f, 'pan_mode', i)
+                        except Exception:
+                            pass
+                        try:
+                            for group, flist in self._search_group_features.items():
+                                for f in flist:
+                                    setattr(f, 'pan_mode', i)
+                        except Exception:
+                            pass
+
+                    try:
+                        cmb.currentIndexChanged.connect(_on_pan_mode_changed)
+                    except Exception:
+                        try:
+                            cmb.activated.connect(_on_pan_mode_changed)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
     def run(self, state=None, layer=None, view_fields=None):
         """検索ダイアログを表示する"""
         # メッセージ表示

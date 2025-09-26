@@ -64,6 +64,8 @@ class SearchFeature(object):
         self.sample_table_task = None
         # 検索ウィジェットは常に有効化（カレントレイヤがNoneでも入力可能にする）
         self.widget.setEnabled(True)
+        # pan mode (0: default zoom-to-selected). May be set by plugin when dialog is created.
+        self.pan_mode = 0
 
 
     @property
@@ -347,14 +349,445 @@ class SearchFeature(object):
         target_layer = layer or self.layer
         if not target_layer:
             return
+        # ensure we operate on the project/map instance of the layer (avoid working on a detached layer object)
+        try:
+            from qgis.core import QgsProject, QgsMessageLog
+            try:
+                mapped = QgsProject.instance().mapLayer(getattr(target_layer, 'id', lambda: None)())
+            except Exception:
+                mapped = None
+            if mapped is not None:
+                try:
+                    QgsMessageLog.logMessage(f"zoom_features: remapped target_layer to project layer id={mapped.id()} name={mapped.name()}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+                target_layer = mapped
+        except Exception:
+            pass
 
         try:
             from qgis.core import QgsMessageLog
             layer_name = getattr(target_layer, 'name', lambda: 'Unknown')()
             QgsMessageLog.logMessage(f"zoom_features: attempting selectByIds on layer={layer_name} ids={ids}", "GEO-search-plugin", 0)
             target_layer.selectByIds(ids)
-            self.iface.mapCanvas().zoomToSelected(target_layer)
-            QgsMessageLog.logMessage(f"zoom_features: zoomed to selected on layer={layer_name}", "GEO-search-plugin", 0)
+            try:
+                QgsMessageLog.logMessage(f"zoom_features: selectByIds called (ids count={len(ids)})", "GEO-search-plugin", 0)
+                # log actual selected ids on the layer to verify selection
+                try:
+                    sel_ids = []
+                    try:
+                        sel_ids = list(target_layer.selectedFeatureIds())
+                    except Exception:
+                        try:
+                            # older API
+                            sel_ids = list(target_layer.selectedFeaturesIds())
+                        except Exception:
+                            sel_ids = []
+                    QgsMessageLog.logMessage(f"zoom_features: layer selected ids after selectByIds={sel_ids}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            mode = int(getattr(self, 'pan_mode', 0) or 0)
+            # if mode==6 -> selection-only: do not change view
+            if mode == 6:
+                QgsMessageLog.logMessage(f"zoom_features: selection-only mode, not changing view for layer={layer_name}", "GEO-search-plugin", 0)
+                return
+
+            canvas = None
+            try:
+                canvas = self.iface.mapCanvas()
+            except Exception:
+                canvas = None
+
+            # fetch feature objects for the requested ids
+            features = []
+            try:
+                from qgis.core import QgsFeatureRequest, QgsMessageLog
+                request = QgsFeatureRequest().setFilterFids(ids)
+                features = list(target_layer.getFeatures(request))
+                try:
+                    QgsMessageLog.logMessage(f"zoom_features: fetched features via getFeatures, count={len(features)}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+            except Exception:
+                # best-effort fallback
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("zoom_features: getFeatures with setFilterFids failed, using fallback get_feature_by_id", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
+                for fid in ids:
+                    try:
+                        f = get_feature_by_id(target_layer, fid)
+                        if f is not None:
+                            features.append(f)
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage(f"zoom_features: fallback got feature id={f.id()}", "GEO-search-plugin", 0)
+                            except Exception:
+                                pass
+                    except Exception:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"zoom_features: fallback failed to get feature for fid={fid}", "GEO-search-plugin", 2)
+                        except Exception:
+                            pass
+
+            # detailed debug: log per-feature info and CRS
+            try:
+                from qgis.core import QgsMessageLog
+                try:
+                    layer_crs = getattr(target_layer, 'crs', lambda: None)()
+                    layer_crs_id = layer_crs.authid() if layer_crs is not None and hasattr(layer_crs, 'authid') else str(layer_crs)
+                except Exception:
+                    layer_crs_id = 'unknown'
+                try:
+                    canvas_crs = None
+                    if canvas is not None:
+                        ms = getattr(canvas, 'mapSettings', None)
+                        if ms:
+                            try:
+                                canvas_crs = ms().destinationCrs()
+                            except Exception:
+                                try:
+                                    canvas_crs = ms().destinationCrs()
+                                except Exception:
+                                    canvas_crs = None
+                        else:
+                            # fallback for older QGIS: mapSettings may be property
+                            try:
+                                canvas_crs = canvas.mapSettings().destinationCrs()
+                            except Exception:
+                                canvas_crs = None
+                    canvas_crs_id = canvas_crs.authid() if canvas_crs is not None and hasattr(canvas_crs, 'authid') else str(canvas_crs)
+                except Exception:
+                    canvas_crs_id = 'unknown'
+                QgsMessageLog.logMessage(f"zoom_features: layer_crs={layer_crs_id} canvas_crs={canvas_crs_id}", "GEO-search-plugin", 0)
+                QgsMessageLog.logMessage(f"zoom_features: iterating features count={len(features)}", "GEO-search-plugin", 0)
+                for f in features:
+                    try:
+                        fid = f.id()
+                        has_geom = False
+                        geom_type = None
+                        wkt = None
+                        bbox_part = None
+                        centroid = None
+                        try:
+                            geom = f.geometry()
+                            if geom is not None and not geom.isEmpty():
+                                has_geom = True
+                                try:
+                                    geom_type = geom.type()
+                                except Exception:
+                                    geom_type = None
+                                try:
+                                    wkt = geom.asWkt()[:200]
+                                except Exception:
+                                    wkt = None
+                                try:
+                                    bbox_part = geom.boundingBox()
+                                except Exception:
+                                    bbox_part = None
+                                try:
+                                    centroid_geom = geom.centroid()
+                                    centroid = centroid_geom.asPoint()
+                                except Exception:
+                                    try:
+                                        centroid = geom.asPoint()
+                                    except Exception:
+                                        centroid = None
+                        except Exception:
+                            pass
+                        QgsMessageLog.logMessage(f"zoom_features: feature id={fid} has_geom={has_geom} geom_type={geom_type} centroid={centroid} bbox={bbox_part} wkt={wkt}", "GEO-search-plugin", 0)
+                    except Exception:
+                        QgsMessageLog.logMessage(f"zoom_features: failed to inspect a feature in features list", "GEO-search-plugin", 2)
+            except Exception:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("zoom_features: failed to log feature details", "GEO-search-plugin", 2)
+                except Exception:
+                    pass
+
+            # compute bbox of features if available
+            try:
+                bbox = None
+                if features:
+                    for f in features:
+                        try:
+                            if bbox is None:
+                                bbox = f.geometry().boundingBox()
+                            else:
+                                bbox.combineExtentWith(f.geometry().boundingBox())
+                        except Exception:
+                            continue
+            except Exception:
+                bbox = None
+
+            # prepare coordinate transform: convert layer CRS geometries to canvas CRS when needed
+            trans_center = None
+            trans_bbox = None
+            try:
+                from qgis.core import QgsCoordinateTransform, QgsProject, QgsPointXY, QgsRectangle, QgsMessageLog
+                # obtain layer and canvas CRS
+                try:
+                    layer_crs = target_layer.crs() if hasattr(target_layer, 'crs') else None
+                except Exception:
+                    layer_crs = None
+                canvas_crs = None
+                if canvas is not None:
+                    try:
+                        ms = getattr(canvas, 'mapSettings', None)
+                        if ms:
+                            canvas_crs = canvas.mapSettings().destinationCrs()
+                        else:
+                            # older canvas API
+                            try:
+                                canvas_crs = canvas.mapSettings().destinationCrs()
+                            except Exception:
+                                canvas_crs = None
+                    except Exception:
+                        canvas_crs = None
+
+                if layer_crs is not None and canvas_crs is not None and layer_crs != canvas_crs:
+                    try:
+                        transform = QgsCoordinateTransform(layer_crs, canvas_crs, QgsProject.instance())
+                        if bbox is not None:
+                            try:
+                                pmin = transform.transform(QgsPointXY(bbox.xMinimum(), bbox.yMinimum()))
+                                pmax = transform.transform(QgsPointXY(bbox.xMaximum(), bbox.yMaximum()))
+                                trans_bbox = QgsRectangle(min(pmin.x(), pmax.x()), min(pmin.y(), pmax.y()), max(pmin.x(), pmax.x()), max(pmin.y(), pmax.y()))
+                            except Exception:
+                                trans_bbox = None
+                        if bbox is not None:
+                            try:
+                                c = bbox.center()
+                                tc = transform.transform(QgsPointXY(c.x(), c.y()))
+                                trans_center = tc
+                            except Exception:
+                                trans_center = None
+                        try:
+                            QgsMessageLog.logMessage(f"zoom_features: transformed center={trans_center} bbox={trans_bbox}", "GEO-search-plugin", 0)
+                        except Exception:
+                            pass
+                    except Exception:
+                        try:
+                            QgsMessageLog.logMessage("zoom_features: coordinate transform setup failed", "GEO-search-plugin", 2)
+                        except Exception:
+                            pass
+
+            except Exception:
+                pass
+
+            # Mode dispatch with robust fallback
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"zoom_features: mode={mode} canvas_present={canvas is not None}", "GEO-search-plugin", 0)
+                view_changed = False
+
+                # 0: zoom to selected (default)
+                if mode == 0:
+                    if canvas is not None:
+                        try:
+                            canvas.zoomToSelected(target_layer)
+                            QgsMessageLog.logMessage(f"zoom_features: zoomed to selected on layer={layer_name}", "GEO-search-plugin", 0)
+                            view_changed = True
+                        except Exception as e:
+                            QgsMessageLog.logMessage(f"zoom_features: zoomToSelected failed: {e}", "GEO-search-plugin", 2)
+
+                # 1: center pan, keep zoom
+                if not view_changed and mode == 1 and bbox is not None and canvas is not None:
+                    try:
+                        center = trans_center if trans_center is not None else bbox.center()
+                        if center is not None:
+                            if hasattr(canvas, 'setCenter'):
+                                canvas.setCenter(center)
+                            else:
+                                try:
+                                    canvas.centerAt(center)
+                                except Exception:
+                                    try:
+                                        canvas.centerAt(center.x(), center.y())
+                                    except Exception:
+                                        pass
+                            canvas.refresh()
+                            view_changed = True
+                    except Exception as e:
+                        try:
+                            QgsMessageLog.logMessage(f"zoom_features: center pan failed: {e}", "GEO-search-plugin", 2)
+                        except Exception:
+                            pass
+
+                # 2: feature center (first feature)
+                if not view_changed and mode == 2 and features:
+                    try:
+                        f0 = features[0]
+                        pt = None
+                        try:
+                            pt = f0.geometry().centroid().asPoint()
+                        except Exception:
+                            try:
+                                pt = f0.geometry().asPoint()
+                            except Exception:
+                                pt = None
+                        # try to transform pt to canvas CRS if needed
+                        try:
+                            if pt is not None and trans_center is None:
+                                # attempt per-point transform
+                                from qgis.core import QgsCoordinateTransform, QgsProject, QgsPointXY
+                                try:
+                                    layer_crs = target_layer.crs() if hasattr(target_layer, 'crs') else None
+                                    ms = getattr(canvas, 'mapSettings', None)
+                                    canvas_crs = canvas.mapSettings().destinationCrs() if ms else None
+                                    if layer_crs is not None and canvas_crs is not None and layer_crs != canvas_crs:
+                                        tr = QgsCoordinateTransform(layer_crs, canvas_crs, QgsProject.instance())
+                                        p = tr.transform(QgsPointXY(pt.x(), pt.y()))
+                                        pt = p
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+
+                        if pt is not None and canvas is not None:
+                            if hasattr(canvas, 'setCenter'):
+                                canvas.setCenter(pt)
+                            else:
+                                try:
+                                    canvas.centerAt(pt)
+                                except Exception:
+                                    try:
+                                        canvas.centerAt(pt.x(), pt.y())
+                                    except Exception:
+                                        pass
+                            canvas.refresh()
+                            view_changed = True
+                    except Exception as e:
+                        try:
+                            QgsMessageLog.logMessage(f"zoom_features: feature center failed: {e}", "GEO-search-plugin", 2)
+                        except Exception:
+                            pass
+
+                # 3: bbox fit with margin
+                if not view_changed and mode == 3 and bbox is not None and canvas is not None:
+                    try:
+                        from qgis.core import QgsRectangle
+                        use_bbox = trans_bbox if trans_bbox is not None else bbox
+                        dx = use_bbox.width() * 0.1
+                        dy = use_bbox.height() * 0.1
+                        expanded = QgsRectangle(use_bbox.xMinimum() - dx, use_bbox.yMinimum() - dy,
+                                                 use_bbox.xMaximum() + dx, use_bbox.yMaximum() + dy)
+                        canvas.setExtent(expanded)
+                        canvas.refresh()
+                        view_changed = True
+                    except Exception as e:
+                        try:
+                            QgsMessageLog.logMessage(f"zoom_features: bbox fit failed: {e}", "GEO-search-plugin", 2)
+                        except Exception:
+                            pass
+
+                # 4: fixed scale display
+                if not view_changed and mode == 4 and bbox is not None and canvas is not None:
+                    try:
+                        center = trans_center if trans_center is not None else bbox.center()
+                        if center is not None:
+                            if hasattr(canvas, 'setCenter'):
+                                canvas.setCenter(center)
+                            else:
+                                try:
+                                    canvas.centerAt(center)
+                                except Exception:
+                                    try:
+                                        canvas.centerAt(center.x(), center.y())
+                                    except Exception:
+                                        pass
+                        try:
+                            canvas.zoomScale(5000)
+                        except Exception:
+                            try:
+                                canvas.zoomScale(10000)
+                            except Exception:
+                                pass
+                        canvas.refresh()
+                        view_changed = True
+                    except Exception as e:
+                        try:
+                            QgsMessageLog.logMessage(f"zoom_features: fixed scale display failed: {e}", "GEO-search-plugin", 2)
+                        except Exception:
+                            pass
+
+                # 5: animated pan
+                if not view_changed and mode == 5 and bbox is not None and canvas is not None:
+                    try:
+                        from qgis.core import QgsPointXY
+                        from qgis.PyQt.QtCore import QTimer
+                        start = canvas.extent().center()
+                        end = trans_center if trans_center is not None else bbox.center()
+                        steps = 12
+                        duration_ms = 300
+                        interval = max(int(duration_ms / steps), 10)
+                        state = {'i': 0}
+
+                        def _step():
+                            state['i'] += 1
+                            t = state['i'] / steps
+                            try:
+                                x = start.x() + (end.x() - start.x()) * t
+                                y = start.y() + (end.y() - start.y()) * t
+                                pt = QgsPointXY(x, y)
+                                if hasattr(canvas, 'setCenter'):
+                                    canvas.setCenter(pt)
+                                else:
+                                    try:
+                                        canvas.centerAt(pt)
+                                    except Exception:
+                                        try:
+                                            canvas.centerAt(pt.x(), pt.y())
+                                        except Exception:
+                                            pass
+                                canvas.refresh()
+                            except Exception:
+                                pass
+                            if state['i'] >= steps:
+                                try:
+                                    from qgis.core import QgsRectangle
+                                    dx = bbox.width() * 0.05
+                                    dy = bbox.height() * 0.05
+                                    expanded = QgsRectangle(bbox.xMinimum() - dx, bbox.yMinimum() - dy,
+                                                             bbox.xMaximum() + dx, bbox.yMaximum() + dy)
+                                    canvas.setExtent(expanded)
+                                    canvas.refresh()
+                                except Exception:
+                                    pass
+
+                        for s in range(steps):
+                            QTimer.singleShot(s * interval, _step)
+                        view_changed = True
+                    except Exception as e:
+                        try:
+                            QgsMessageLog.logMessage(f"zoom_features: animated pan failed: {e}", "GEO-search-plugin", 2)
+                        except Exception:
+                            pass
+
+                # if nothing changed the view, try a final forced zoomToSelected
+                if not view_changed:
+                    try:
+                        if canvas is not None:
+                            try:
+                                canvas.zoomToSelected(target_layer)
+                                QgsMessageLog.logMessage(f"zoom_features: fallback zoomToSelected on layer={layer_name}", "GEO-search-plugin", 0)
+                                return
+                            except Exception as e:
+                                QgsMessageLog.logMessage(f"zoom_features: fallback zoomToSelected failed: {e}", "GEO-search-plugin", 2)
+                    except Exception:
+                        pass
+
+            except Exception:
+                # final fallback
+                try:
+                    if canvas is not None:
+                        canvas.zoomToSelected(target_layer)
+                except Exception:
+                    pass
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog
