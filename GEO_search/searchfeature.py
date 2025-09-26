@@ -618,72 +618,9 @@ class SearchFeature(object):
                         except Exception:
                             pass
 
-                # 2: feature center (first feature)
-                if not view_changed and mode == 2 and features:
-                    try:
-                        f0 = features[0]
-                        pt = None
-                        try:
-                            pt = f0.geometry().centroid().asPoint()
-                        except Exception:
-                            try:
-                                pt = f0.geometry().asPoint()
-                            except Exception:
-                                pt = None
-                        # try to transform pt to canvas CRS if needed
-                        try:
-                            if pt is not None and trans_center is None:
-                                # attempt per-point transform
-                                from qgis.core import QgsCoordinateTransform, QgsProject, QgsPointXY
-                                try:
-                                    layer_crs = target_layer.crs() if hasattr(target_layer, 'crs') else None
-                                    ms = getattr(canvas, 'mapSettings', None)
-                                    canvas_crs = canvas.mapSettings().destinationCrs() if ms else None
-                                    if layer_crs is not None and canvas_crs is not None and layer_crs != canvas_crs:
-                                        tr = QgsCoordinateTransform(layer_crs, canvas_crs, QgsProject.instance())
-                                        p = tr.transform(QgsPointXY(pt.x(), pt.y()))
-                                        pt = p
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                # mode 2 (feature center) removed per configuration; fall through to fallback behavior
 
-                        if pt is not None and canvas is not None:
-                            if hasattr(canvas, 'setCenter'):
-                                canvas.setCenter(pt)
-                            else:
-                                try:
-                                    canvas.centerAt(pt)
-                                except Exception:
-                                    try:
-                                        canvas.centerAt(pt.x(), pt.y())
-                                    except Exception:
-                                        pass
-                            canvas.refresh()
-                            view_changed = True
-                    except Exception as e:
-                        try:
-                            QgsMessageLog.logMessage(f"zoom_features: feature center failed: {e}", "GEO-search-plugin", 2)
-                        except Exception:
-                            pass
-
-                # 3: bbox fit with margin
-                if not view_changed and mode == 3 and bbox is not None and canvas is not None:
-                    try:
-                        from qgis.core import QgsRectangle
-                        use_bbox = trans_bbox if trans_bbox is not None else bbox
-                        dx = use_bbox.width() * 0.1
-                        dy = use_bbox.height() * 0.1
-                        expanded = QgsRectangle(use_bbox.xMinimum() - dx, use_bbox.yMinimum() - dy,
-                                                 use_bbox.xMaximum() + dx, use_bbox.yMaximum() + dy)
-                        canvas.setExtent(expanded)
-                        canvas.refresh()
-                        view_changed = True
-                    except Exception as e:
-                        try:
-                            QgsMessageLog.logMessage(f"zoom_features: bbox fit failed: {e}", "GEO-search-plugin", 2)
-                        except Exception:
-                            pass
+                # mode 3 (bbox fit with margin) removed per configuration; fall through to fallback behavior
 
                 # 4: fixed scale display
                 if not view_changed and mode == 4 and bbox is not None and canvas is not None:

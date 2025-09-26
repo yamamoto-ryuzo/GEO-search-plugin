@@ -379,7 +379,20 @@ class plugin(object):
             try:
                 cmb = getattr(self.dialog, 'panModeComboBox', None)
                 if cmb is not None:
-                    idx = cmb.currentIndex()
+                    # Map UI combo indices to internal pan mode values. Mode 3 (bbox-fit) is removed,
+                    # so we skip it in the mapping to keep internal mode IDs stable.
+                    index_to_mode = [0, 1, 4, 5, 6]
+
+                    def mapped_mode(i):
+                        try:
+                            i = int(i)
+                        except Exception:
+                            i = 0
+                        if 0 <= i < len(index_to_mode):
+                            return index_to_mode[i]
+                        return 0
+
+                    idx = mapped_mode(cmb.currentIndex())
                     # set initial pan_mode on all features (grouped or not)
                     try:
                         for f in self._search_features:
@@ -395,15 +408,16 @@ class plugin(object):
 
                     # update function when combo changes
                     def _on_pan_mode_changed(i):
+                        m = mapped_mode(i)
                         try:
                             for f in self._search_features:
-                                setattr(f, 'pan_mode', i)
+                                setattr(f, 'pan_mode', m)
                         except Exception:
                             pass
                         try:
                             for group, flist in self._search_group_features.items():
                                 for f in flist:
-                                    setattr(f, 'pan_mode', i)
+                                    setattr(f, 'pan_mode', m)
                         except Exception:
                             pass
 
