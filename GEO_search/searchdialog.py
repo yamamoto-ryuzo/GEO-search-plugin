@@ -797,6 +797,20 @@ class SearchDialog(QDialog):
                 editable_fields["selectTheme"] = tab_config["selectTheme"]
             else:
                 editable_fields["selectTheme"] = ""
+            # 角度（map rotation）を追加: 0-360 の整数値を編集できるようにする
+            # 既存設定があれば引き継ぐ
+            if "angle" in tab_config:
+                # preserve explicit null (None) as None so UI can show '未指定'
+                val = tab_config.get("angle")
+                if val is None:
+                    editable_fields["angle"] = None
+                else:
+                    try:
+                        editable_fields["angle"] = float(val)
+                    except Exception:
+                        editable_fields["angle"] = 0.0
+            else:
+                editable_fields["angle"] = None
             
             for key, value in tab_config.items():
                 if key not in ["group", "Title", "SearchField", "ViewFields"]:
@@ -808,7 +822,11 @@ class SearchDialog(QDialog):
             # 編集可能フィールドの設定
             row = 0
             for field_name, field_value in editable_fields.items():
-                label = QLabel(f"{field_name}:", edit_dialog)
+                # 日本語ラベルを使う（角度は分かりやすく表示）
+                if field_name == "angle":
+                    label = QLabel("角度（度）:", edit_dialog)
+                else:
+                    label = QLabel(f"{field_name}:", edit_dialog)
                 label.setStyleSheet("font-weight: bold;")
                 grid_layout.addWidget(label, row, 0)
 
@@ -833,6 +851,82 @@ class SearchDialog(QDialog):
                         editor.setCurrentText(field_value)
                     grid_layout.addWidget(editor, row, 1)
                     editors[field_name] = editor
+                elif field_name == "angle":
+                    # 角度入力用の小数対応スピンボックス + 未指定チェックボックス
+                    from qgis.PyQt.QtWidgets import QDoubleSpinBox, QCheckBox, QHBoxLayout
+                    container = QHBoxLayout()
+                    spin = QDoubleSpinBox(edit_dialog)
+                    spin.setObjectName(f"{field_name}_editor")
+                    spin.setRange(0.0, 360.0)
+                    spin.setSingleStep(0.1)
+                    spin.setDecimals(2)
+                    # checkbox: 指定しない -> NULL
+                    chk = QCheckBox("指定しない (NULL)", edit_dialog)
+                    # set initial state based on field_value (None means unspecified)
+                    try:
+                        if field_value is None:
+                            chk.setChecked(True)
+                            spin.setValue(0.0)
+                            spin.setDisabled(True)
+                        else:
+                            chk.setChecked(False)
+                            spin.setValue(float(field_value))
+                            spin.setDisabled(False)
+                    except Exception:
+                        chk.setChecked(True)
+                        spin.setValue(0.0)
+                        spin.setDisabled(True)
+
+                    # toggle behavior
+                    def _on_chk_toggled(state, spin_box=spin):
+                        try:
+                            spin_box.setDisabled(bool(state))
+                        except Exception:
+                            pass
+
+                    chk.toggled.connect(_on_chk_toggled)
+                    from qgis.PyQt.QtWidgets import QPushButton
+
+                    # ボタン: 現在の地図回転値を設定
+                    set_current_btn = QPushButton("現在の値を設定", edit_dialog)
+
+                    def _set_current_value(btn=None, spin_box=spin):
+                        try:
+                            # prefer dialog's iface, fallback to parent iface
+                            iface = getattr(self, 'iface', None)
+                            if iface is None and hasattr(self.parent(), 'iface'):
+                                iface = self.parent().iface
+                            if iface is None:
+                                return
+                            try:
+                                canvas = iface.mapCanvas()
+                                rotation = canvas.rotation() if hasattr(canvas, 'rotation') else None
+                            except Exception:
+                                rotation = None
+                            if rotation is None:
+                                return
+                            try:
+                                spin_box.setValue(float(rotation))
+                                # uncheck '指定しない' if it was checked
+                                try:
+                                    if chk.isChecked():
+                                        chk.setChecked(False)
+                                        spin_box.setDisabled(False)
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+
+                    set_current_btn.clicked.connect(_set_current_value)
+
+                    container.addWidget(spin)
+                    container.addWidget(chk)
+                    container.addWidget(set_current_btn)
+                    grid_layout.addLayout(container, row, 1)
+                    # store tuple so save logic can detect checkbox and button
+                    editors[field_name] = (spin, chk, set_current_btn)
                 else:
                     # 既存のTQextEditエディタ
                     editor = QTextEdit(edit_dialog)
@@ -1369,6 +1463,25 @@ class SearchDialog(QDialog):
                         tab_config[field_name] = editor.currentText().strip()
                     else:
                         tab_config[field_name] = editor.text().strip()
+                elif field_name == "angle":
+                    # editor may be a tuple (spin, checkbox) to support 'unspecified'
+                    try:
+                        if isinstance(editor, tuple) and len(editor) == 2:
+                            spin_box, checkbox = editor
+                            try:
+                                if checkbox.isChecked():
+                                    tab_config[field_name] = None
+                                else:
+                                    tab_config[field_name] = float(spin_box.value())
+                            except Exception:
+                                tab_config[field_name] = None
+                        else:
+                            if hasattr(editor, 'value'):
+                                tab_config[field_name] = float(editor.value())
+                            else:
+                                tab_config[field_name] = float(editor.toPlainText())
+                    except Exception:
+                        tab_config[field_name] = None
                 else:
                     text = editor.toPlainText()
                     try:

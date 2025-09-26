@@ -55,6 +55,16 @@
       </item>
       <item>
         <property name="text">
+         <string>1:250</string>
+        </property>
+      </item>
+      <item>
+        <property name="text">
+         <string>1:500</string>
+        </property>
+      </item>
+      <item>
+        <property name="text">
          <string>1:1,000</string>
         </property>
       </item>
@@ -97,7 +107,6 @@
        <string>中心へパン（ズーム維持）</string>
       </property>
      </item>
-     <!-- removed: フィーチャ中心へパン and bbox-fit -->
      <item>
       <property name="text">
        <string>固定縮尺で表示</string>
