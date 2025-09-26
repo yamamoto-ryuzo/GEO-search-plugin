@@ -659,8 +659,9 @@ class SearchFeature(object):
                         from qgis.PyQt.QtCore import QTimer
                         start = canvas.extent().center()
                         end = trans_center if trans_center is not None else bbox.center()
-                        steps = 12
-                        duration_ms = 300
+                        # more steps and longer duration for a slower, smoother animation
+                        steps = 20
+                        duration_ms = 800
                         interval = max(int(duration_ms / steps), 10)
                         state = {'i': 0}
 
@@ -687,12 +688,20 @@ class SearchFeature(object):
                             if state['i'] >= steps:
                                 try:
                                     from qgis.core import QgsRectangle
-                                    dx = bbox.width() * 0.05
-                                    dy = bbox.height() * 0.05
-                                    expanded = QgsRectangle(bbox.xMinimum() - dx, bbox.yMinimum() - dy,
-                                                             bbox.xMaximum() + dx, bbox.yMaximum() + dy)
-                                    canvas.setExtent(expanded)
-                                    canvas.refresh()
+                                    # Use transformed bbox when available (canvas CRS). If not, fall back to original bbox.
+                                    use_bbox = trans_bbox if 'trans_bbox' in locals() and trans_bbox is not None else bbox
+                                    if use_bbox is not None:
+                                        dx = use_bbox.width() * 0.05
+                                        dy = use_bbox.height() * 0.05
+                                        expanded = QgsRectangle(use_bbox.xMinimum() - dx, use_bbox.yMinimum() - dy,
+                                                                 use_bbox.xMaximum() + dx, use_bbox.yMaximum() + dy)
+                                        # Log which bbox was used for the final extent and its values
+                                        try:
+                                            QgsMessageLog.logMessage(f"zoom_features: animated pan final extent used_bbox={'trans_bbox' if use_bbox is trans_bbox else 'bbox'} expanded={expanded}", "GEO-search-plugin", 0)
+                                        except Exception:
+                                            pass
+                                        canvas.setExtent(expanded)
+                                        canvas.refresh()
                                 except Exception:
                                     pass
 
