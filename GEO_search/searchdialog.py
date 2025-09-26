@@ -811,9 +811,24 @@ class SearchDialog(QDialog):
                         editable_fields["angle"] = 0.0
             else:
                 editable_fields["angle"] = None
+            # スケール（scale）を追加: 角度と同じ入力方式（数値＋未指定チェック）
+            if "scale" in tab_config:
+                val = tab_config.get("scale")
+                if val is None:
+                    editable_fields["scale"] = None
+                else:
+                    try:
+                        editable_fields["scale"] = float(val)
+                    except Exception:
+                        editable_fields["scale"] = 0.0
+            else:
+                editable_fields["scale"] = None
             
+            # readonly_fields に編集可能フィールドが混入すると同じ項目が編集セクションと
+            # 読み取り専用セクションの両方に表示されてしまうため、編集可能にしたキーは除外する
+            editable_exclude = {"group", "Title", "SearchField", "ViewFields", "selectTheme", "angle", "scale"}
             for key, value in tab_config.items():
-                if key not in ["group", "Title", "SearchField", "ViewFields"]:
+                if key not in editable_exclude:
                     readonly_fields[key] = value
                     
             # テキストエディタを作成
@@ -822,9 +837,11 @@ class SearchDialog(QDialog):
             # 編集可能フィールドの設定
             row = 0
             for field_name, field_value in editable_fields.items():
-                # 日本語ラベルを使う（角度は分かりやすく表示）
+                # 日本語ラベルを使う（角度/スケールは分かりやすく表示）
                 if field_name == "angle":
                     label = QLabel("角度（度）:", edit_dialog)
+                elif field_name == "scale":
+                    label = QLabel("スケール:", edit_dialog)
                 else:
                     label = QLabel(f"{field_name}:", edit_dialog)
                 label.setStyleSheet("font-weight: bold;")
@@ -926,6 +943,80 @@ class SearchDialog(QDialog):
                     container.addWidget(set_current_btn)
                     grid_layout.addLayout(container, row, 1)
                     # store tuple so save logic can detect checkbox and button
+                    editors[field_name] = (spin, chk, set_current_btn)
+                elif field_name == "scale":
+                    # スケール入力用の小数対応スピンボックス + 未指定チェックボックス
+                    from qgis.PyQt.QtWidgets import QDoubleSpinBox, QCheckBox, QHBoxLayout
+                    container = QHBoxLayout()
+                    spin = QDoubleSpinBox(edit_dialog)
+                    spin.setObjectName(f"{field_name}_editor")
+                    # スケールは大きめの範囲に設定
+                    spin.setRange(0.0, 1e9)
+                    spin.setSingleStep(100.0)
+                    spin.setDecimals(2)
+                    # checkbox: 指定しない -> NULL
+                    chk = QCheckBox("指定しない (NULL)", edit_dialog)
+                    # set initial state based on field_value (None means unspecified)
+                    try:
+                        if field_value is None:
+                            chk.setChecked(True)
+                            spin.setValue(0.0)
+                            spin.setDisabled(True)
+                        else:
+                            chk.setChecked(False)
+                            spin.setValue(float(field_value))
+                            spin.setDisabled(False)
+                    except Exception:
+                        chk.setChecked(True)
+                        spin.setValue(0.0)
+                        spin.setDisabled(True)
+
+                    # toggle behavior
+                    def _on_chk_toggled_scale(state, spin_box=spin):
+                        try:
+                            spin_box.setDisabled(bool(state))
+                        except Exception:
+                            pass
+
+                    chk.toggled.connect(_on_chk_toggled_scale)
+                    from qgis.PyQt.QtWidgets import QPushButton
+
+                    # ボタン: 現在の地図スケールを設定
+                    set_current_btn = QPushButton("現在のスケールを設定", edit_dialog)
+
+                    def _set_current_scale(btn=None, spin_box=spin):
+                        try:
+                            iface = getattr(self, 'iface', None)
+                            if iface is None and hasattr(self.parent(), 'iface'):
+                                iface = self.parent().iface
+                            if iface is None:
+                                return
+                            try:
+                                canvas = iface.mapCanvas()
+                                scale_val = canvas.scale() if hasattr(canvas, 'scale') else None
+                            except Exception:
+                                scale_val = None
+                            if scale_val is None:
+                                return
+                            try:
+                                spin_box.setValue(float(scale_val))
+                                try:
+                                    if chk.isChecked():
+                                        chk.setChecked(False)
+                                        spin_box.setDisabled(False)
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+
+                    set_current_btn.clicked.connect(_set_current_scale)
+
+                    container.addWidget(spin)
+                    container.addWidget(chk)
+                    container.addWidget(set_current_btn)
+                    grid_layout.addLayout(container, row, 1)
                     editors[field_name] = (spin, chk, set_current_btn)
                 else:
                     # 既存のTQextEditエディタ
@@ -1467,6 +1558,26 @@ class SearchDialog(QDialog):
                     # editor may be a tuple (spin, checkbox) to support 'unspecified'
                     try:
                         # editor may be a tuple (spin, checkbox) or (spin, checkbox, button)
+                        if isinstance(editor, tuple) and len(editor) >= 2:
+                            spin_box = editor[0]
+                            checkbox = editor[1]
+                            try:
+                                if checkbox.isChecked():
+                                    tab_config[field_name] = None
+                                else:
+                                    tab_config[field_name] = float(spin_box.value())
+                            except Exception:
+                                tab_config[field_name] = None
+                        else:
+                            if hasattr(editor, 'value'):
+                                tab_config[field_name] = float(editor.value())
+                            else:
+                                tab_config[field_name] = float(editor.toPlainText())
+                    except Exception:
+                        tab_config[field_name] = None
+                elif field_name == "scale":
+                    # editor may be a tuple (spin, checkbox) to support 'unspecified'
+                    try:
                         if isinstance(editor, tuple) and len(editor) >= 2:
                             spin_box = editor[0]
                             checkbox = editor[1]
