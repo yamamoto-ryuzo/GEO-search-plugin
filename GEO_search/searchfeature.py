@@ -625,30 +625,52 @@ class SearchFeature(object):
                 # 4: fixed scale display
                 if not view_changed and mode == 4 and bbox is not None and canvas is not None:
                     try:
-                        center = trans_center if trans_center is not None else bbox.center()
-                        if center is not None:
-                            if hasattr(canvas, 'setCenter'):
-                                canvas.setCenter(center)
-                            else:
+                        fs = getattr(self, 'fixed_scale', None)
+                        # If fixed_scale is None -> behave like mode==1 (center pan, keep zoom)
+                        if fs is None:
+                            center = trans_center if trans_center is not None else bbox.center()
+                            if center is not None:
                                 try:
-                                    canvas.centerAt(center)
+                                    if hasattr(canvas, 'setCenter'):
+                                        canvas.setCenter(center)
+                                    else:
+                                        canvas.centerAt(center)
                                 except Exception:
                                     try:
                                         canvas.centerAt(center.x(), center.y())
                                     except Exception:
                                         pass
-                        try:
-                            canvas.zoomScale(5000)
-                        except Exception:
+                                canvas.refresh()
+                                view_changed = True
+                        else:
+                            center = trans_center if trans_center is not None else bbox.center()
+                            if center is not None:
+                                try:
+                                    if hasattr(canvas, 'setCenter'):
+                                        canvas.setCenter(center)
+                                    else:
+                                        canvas.centerAt(center)
+                                except Exception:
+                                    try:
+                                        canvas.centerAt(center.x(), center.y())
+                                    except Exception:
+                                        pass
+                            # apply the provided fixed scale
                             try:
-                                canvas.zoomScale(10000)
+                                if isinstance(fs, int) and fs > 0:
+                                    canvas.zoomScale(fs)
+                                else:
+                                    canvas.zoomScale(5000)
                             except Exception:
-                                pass
-                        canvas.refresh()
-                        view_changed = True
+                                try:
+                                    canvas.zoomScale(10000)
+                                except Exception:
+                                    pass
+                            canvas.refresh()
+                            view_changed = True
                     except Exception as e:
                         try:
-                            QgsMessageLog.logMessage(f"zoom_features: fixed scale display failed: {e}", "GEO-search-plugin", 2)
+                            QgsMessageLog.logMessage(f"zoom_features: fixed scale (mode4) outer failed: {e}", "GEO-search-plugin", 2)
                         except Exception:
                             pass
 

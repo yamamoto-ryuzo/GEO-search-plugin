@@ -406,6 +406,76 @@ class plugin(object):
                     except Exception:
                         pass
 
+                    # If the dialog provides a scaleComboBox, propagate its value to features as `fixed_scale`.
+                    try:
+                        scale_cmb = getattr(self.dialog, 'scaleComboBox', None)
+                        def _parse_scale_text(t):
+                            try:
+                                if t is None:
+                                    return None
+                                # support formats like '1:5,000' or '5000'
+                                s = str(t)
+                                if ':' in s:
+                                    s = s.split(':', 1)[1]
+                                s = s.replace(',', '').strip()
+                                v = int(s)
+                                return v
+                            except Exception:
+                                return None
+
+                        if scale_cmb is not None:
+                            val = _parse_scale_text(scale_cmb.currentText())
+                            # if user selected "自動(無指定)" or parsing failed, leave as None
+                            try:
+                                for f in self._search_features:
+                                    setattr(f, 'fixed_scale', val)
+                            except Exception:
+                                pass
+                            try:
+                                for group, flist in self._search_group_features.items():
+                                    for f in flist:
+                                        setattr(f, 'fixed_scale', val)
+                            except Exception:
+                                pass
+
+                            def _on_scale_changed(i=None):
+                                try:
+                                    txt = scale_cmb.currentText()
+                                    v = _parse_scale_text(txt)
+                                    # If parsing failed or user selected automatic, leave as None.
+                                    # Do NOT fallback to the current canvas scale here — when
+                                    # fixed_scale is None, SearchFeature.zoom_features will
+                                    # behave like mode==1 (center-pan, keep zoom).
+                                    for f in self._search_features:
+                                        setattr(f, 'fixed_scale', v)
+                                    try:
+                                        for group, flist in self._search_group_features.items():
+                                            for f in flist:
+                                                setattr(f, 'fixed_scale', v)
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    pass
+
+                            try:
+                                scale_cmb.currentIndexChanged.connect(_on_scale_changed)
+                            except Exception:
+                                try:
+                                    scale_cmb.activated.connect(_on_scale_changed)
+                                except Exception:
+                                    pass
+                            # also react to direct text editing (editable combo)
+                            try:
+                                scale_cmb.editTextChanged.connect(_on_scale_changed)
+                            except Exception:
+                                pass
+                            try:
+                                scale_cmb.editingFinished.connect(_on_scale_changed)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
                     # update function when combo changes
                     def _on_pan_mode_changed(i):
                         m = mapped_mode(i)
