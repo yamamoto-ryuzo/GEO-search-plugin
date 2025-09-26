@@ -498,6 +498,46 @@ class plugin(object):
                             cmb.activated.connect(_on_pan_mode_changed)
                         except Exception:
                             pass
+                    # propagate rotate checkbox (if present) to features
+                    try:
+                        rot_cmb = getattr(self.dialog, 'rotateCheckBox', None)
+                        if rot_cmb is not None:
+                            # set initial value
+                            v = bool(rot_cmb.isChecked())
+                            try:
+                                for f in self._search_features:
+                                    setattr(f, 'rotate_to_feature', v)
+                            except Exception:
+                                pass
+                            try:
+                                for group, flist in self._search_group_features.items():
+                                    for f in flist:
+                                        setattr(f, 'rotate_to_feature', v)
+                            except Exception:
+                                pass
+
+                            def _on_rotate_changed(checked):
+                                try:
+                                    for f in self._search_features:
+                                        setattr(f, 'rotate_to_feature', bool(checked))
+                                except Exception:
+                                    pass
+                                try:
+                                    for group, flist in self._search_group_features.items():
+                                        for f in flist:
+                                            setattr(f, 'rotate_to_feature', bool(checked))
+                                except Exception:
+                                    pass
+
+                            try:
+                                rot_cmb.toggled.connect(_on_rotate_changed)
+                            except Exception:
+                                try:
+                                    rot_cmb.stateChanged.connect(lambda s: _on_rotate_changed(bool(s)))
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
             except Exception:
                 pass
 

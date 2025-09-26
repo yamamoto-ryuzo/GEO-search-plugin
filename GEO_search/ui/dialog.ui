@@ -85,13 +85,23 @@
       </item>
      </widget>
     </item>
-    <item row="2" column="1" colspan="5">
+  <item row="2" column="1" colspan="4">
      <widget class="QComboBox" name="panModeComboBox">
      <item>
       <property name="text">
        <string>ズームして選択範囲にフィット</string>
       </property>
-     </item>
+  </item>
+  <item row="2" column="5">
+   <widget class="QCheckBox" name="rotateCheckBox">
+    <property name="toolTip">
+     <string>選択地物の長手方向にマップを回転します</string>
+    </property>
+    <property name="text">
+     <string>地物の長手方向に回転</string>
+    </property>
+   </widget>
+  </item>
      <item>
       <property name="text">
        <string>中心へパン（ズーム維持）</string>

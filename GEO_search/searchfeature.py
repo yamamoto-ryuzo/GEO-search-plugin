@@ -191,6 +191,46 @@ class SearchFeature(object):
         """検索値を正規化する（全角英数字を半角に変換）"""
         if not value:
             return value
+
+    def _major_axis_angle(self, geom):
+        """Estimate major axis angle (degrees) of a geometry using PCA on vertices.
+        Returns angle in degrees measured from X axis (counter-clockwise)."""
+        try:
+            pts = []
+            try:
+                for p in geom.vertices():
+                    pts.append((float(p.x()), float(p.y())))
+            except Exception:
+                # fallback: try asPolyline / asPolygon
+                try:
+                    pl = geom.asPolyline()
+                    for p in pl:
+                        pts.append((float(p.x()), float(p.y())))
+                except Exception:
+                    try:
+                        polys = geom.asPolygon()
+                        for ring in polys:
+                            for p in ring:
+                                pts.append((float(p.x()), float(p.y())))
+                    except Exception:
+                        pass
+
+            if not pts:
+                return None
+
+            n = float(len(pts))
+            sx = sum(p[0] for p in pts) / n
+            sy = sum(p[1] for p in pts) / n
+            cov_xx = sum((p[0] - sx) ** 2 for p in pts) / n
+            cov_yy = sum((p[1] - sy) ** 2 for p in pts) / n
+            cov_xy = sum((p[0] - sx) * (p[1] - sy) for p in pts) / n
+
+            import math
+            # angle of principal axis (radians)
+            angle = 0.5 * math.atan2(2.0 * cov_xy, cov_xx - cov_yy)
+            return math.degrees(angle)
+        except Exception:
+            return None
         
         try:
             # jaconvを使用して全角英数字を半角に変換
@@ -748,7 +788,70 @@ class SearchFeature(object):
                                 QgsMessageLog.logMessage(f"zoom_features: fallback zoomToSelected failed: {e}", "GEO-search-plugin", 2)
                     except Exception:
                         pass
+                # If requested, rotate the map to align with the feature's major axis.
+                try:
+                    if view_changed and getattr(self, 'rotate_to_feature', False) and canvas is not None:
+                        # For animated pan (mode==5) the final extent is set asynchronously
+                        # in the timer callback; the animated branch also performs rotation there.
+                        if mode != 5:
+                            try:
+                                feat_geom = None
+                                if features:
+                                    try:
+                                        feat_geom = features[0].geometry()
+                                    except Exception:
+                                        feat_geom = None
+                                if feat_geom is not None and not feat_geom.isEmpty():
+                                    try:
+                                        from qgis.core import QgsCoordinateTransform, QgsProject
+                                        # determine CRS for transform
+                                        try:
+                                            layer_crs = target_layer.crs() if hasattr(target_layer, 'crs') else None
+                                        except Exception:
+                                            layer_crs = None
+                                        canvas_crs = None
+                                        try:
+                                            ms = getattr(canvas, 'mapSettings', None)
+                                            if ms:
+                                                canvas_crs = canvas.mapSettings().destinationCrs()
+                                            else:
+                                                canvas_crs = canvas.mapSettings().destinationCrs()
+                                        except Exception:
+                                            canvas_crs = None
 
+                                        geom_for_angle = feat_geom
+                                        if layer_crs is not None and canvas_crs is not None and layer_crs != canvas_crs:
+                                            try:
+                                                transform = QgsCoordinateTransform(layer_crs, canvas_crs, QgsProject.instance())
+                                                geom_for_angle = feat_geom.clone()
+                                                geom_for_angle.transform(transform)
+                                            except Exception:
+                                                geom_for_angle = feat_geom
+
+                                        angle = self._major_axis_angle(geom_for_angle)
+                                        try:
+                                            from qgis.core import QgsMessageLog
+                                            QgsMessageLog.logMessage(f"zoom_features: rotate_to_feature angle={angle}", "GEO-search-plugin", 0)
+                                        except Exception:
+                                            pass
+                                        if angle is not None:
+                                            # rotate so that major axis becomes vertical (map Y axis)
+                                            rotate_deg = 90.0 - float(angle)
+                                            try:
+                                                # canvas.setRotation exists in newer QGIS versions
+                                                canvas.setRotation(rotate_deg)
+                                            except Exception:
+                                                try:
+                                                    # older API: maybe use setRotation with opposite sign
+                                                    canvas.setRotation(-rotate_deg)
+                                                except Exception:
+                                                    pass
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
             except Exception:
                 # final fallback
                 try:
