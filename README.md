@@ -3,6 +3,7 @@
 　<img width="213" height="35" alt="image" src="https://github.com/user-attachments/assets/8010fdf0-5e57-4215-8b3a-6dcd3e61fc9f" />
 
 最終的には https://github.com/NationalSecurityAgency/qgis-searchlayers-plugin と統合したい  
+
 ### UI設定画面(プロジェクトファイルに設定されます)  
 <img width="686" height="740" alt="image" src="https://github.com/user-attachments/assets/27cad15f-890f-4bfc-9c61-3660531e7c32" />
 
@@ -168,6 +169,8 @@
 | Message | 左下のヘルプボタンで表示するテキスト | str |
 | TibanField | 地番の属性名 | str |
 | AzaTable | 地番検索用: 字コード設定 | dict |
+| angle | タブごとに適用するマップ回転角度（度）。-360〜360 の数値を指定。未指定の場合は回転を変更しません。回転はパン／ズーム処理の後に適用されます。 | number (float) |
+| scale | 検索時に適用する地図の縮尺（分母）。例: 5000。未指定の場合は縮尺を変更しません。固定スケール表示モードと組み合わせて使用できます。 | number (float) |
 | selectTheme | 検索時に適用するQGISマップテーマ名。指定しない場合はテーマ切替なし | str (optional) |
 
 ### マップテーマ機能について

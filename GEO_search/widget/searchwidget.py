@@ -21,6 +21,8 @@ from qgis.PyQt.QtWidgets import (
 class SearchWidget(QWidget):
     def __init__(self, setting, parent=None):
         super(SearchWidget, self).__init__(parent=parent)
+        # keep setting so widgets can show per-tab configuration (angle/scale)
+        self.setting = setting or {}
         search_fields = setting.get("SearchFields")
         if not search_fields:
             search_field = setting.get("SearchField")
@@ -51,10 +53,82 @@ class SearchWidget(QWidget):
         raise NotImplementedError
 
     def init_layout(self, widgets):
-        layout = QHBoxLayout()
+        # create an outer vertical layout so we can place the input widgets
+        # on the first row and the angle/scale display on the second row
+        outer = QVBoxLayout()
+        inner = QHBoxLayout()
         for widget in widgets:
-            layout.addWidget(widget)
-        self.setLayout(layout)
+            # preserve any QLayout items by adding layout or widget appropriately
+            try:
+                if isinstance(widget, QLayout):
+                    inner.addLayout(widget)
+                else:
+                    inner.addWidget(widget)
+            except Exception:
+                try:
+                    inner.addWidget(widget)
+                except Exception:
+                    pass
+
+        outer.addLayout(inner)
+        # add angle/scale display on a new row under the inputs
+        try:
+            outer.addLayout(self._angle_scale_layout())
+        except Exception:
+            pass
+
+        self.setLayout(outer)
+
+    def _angle_scale_layout(self):
+        """Return a QHBoxLayout containing angle and scale labels based on self.setting."""
+        from qgis.PyQt.QtWidgets import QLabel, QHBoxLayout
+
+        h = QHBoxLayout()
+        try:
+            angle = self.setting.get('angle') if isinstance(self.setting, dict) else None
+        except Exception:
+            angle = None
+        try:
+            scale = self.setting.get('scale') if isinstance(self.setting, dict) else None
+        except Exception:
+            scale = None
+
+        if angle is None:
+            angle_text = "角度: 未指定"
+        else:
+            try:
+                angle_text = f"角度: {float(angle)}°"
+            except Exception:
+                angle_text = f"角度: {angle}"
+
+        if scale is None:
+            scale_text = "スケール: 未指定"
+        else:
+            try:
+                # show as integer when possible
+                s = float(scale)
+                if abs(s - int(s)) < 1e-6:
+                    scale_text = f"スケール: {int(s)}"
+                else:
+                    scale_text = f"スケール: {s}"
+            except Exception:
+                scale_text = f"スケール: {scale}"
+
+        la = QLabel(angle_text)
+        ls = QLabel(scale_text)
+        la.setStyleSheet("color: #333333; font-size: 11px;")
+        ls.setStyleSheet("color: #333333; font-size: 11px;")
+        h.addWidget(la)
+        h.addWidget(ls)
+        # stretch to push labels to the left
+        try:
+            from qgis.PyQt.QtWidgets import QSpacerItem, QSizePolicy
+            spacer = QSpacerItem(20, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
+            # layouts accept addItem
+            h.addItem(spacer)
+        except Exception:
+            pass
+        return h
 
 
 # 通常検索
@@ -125,6 +199,11 @@ class SearchTibanWidget(SearchTextWidget):
                 layout.addLayout(widget)
             else:
                 layout.addWidget(widget)
+        # add angle/scale display for this widget
+        try:
+            layout.addLayout(self._angle_scale_layout())
+        except Exception:
+            pass
         self.setLayout(layout)
 
     def create_widgets(self, setting):
@@ -176,6 +255,12 @@ class SearchOwnerWidget(SearchTextWidget):
                 layout.addItem(widget)
             else:
                 layout.addWidget(widget)
+
+        # add angle/scale display for this widget
+        try:
+            layout.addLayout(self._angle_scale_layout())
+        except Exception:
+            pass
 
         self.setLayout(layout)
 

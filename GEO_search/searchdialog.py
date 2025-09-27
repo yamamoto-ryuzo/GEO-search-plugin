@@ -797,7 +797,7 @@ class SearchDialog(QDialog):
                 editable_fields["selectTheme"] = tab_config["selectTheme"]
             else:
                 editable_fields["selectTheme"] = ""
-            # 角度（map rotation）を追加: 0-360 の整数値を編集できるようにする
+            # 角度（map rotation）を追加: -360..360 の数値を編集できるようにする
             # 既存設定があれば引き継ぐ
             if "angle" in tab_config:
                 # preserve explicit null (None) as None so UI can show '未指定'
@@ -874,7 +874,8 @@ class SearchDialog(QDialog):
                     container = QHBoxLayout()
                     spin = QDoubleSpinBox(edit_dialog)
                     spin.setObjectName(f"{field_name}_editor")
-                    spin.setRange(0.0, 360.0)
+                    # allow negative angles too: -360..360
+                    spin.setRange(-360.0, 360.0)
                     spin.setSingleStep(5.0)
                     spin.setDecimals(2)
                     # checkbox: 指定しない -> NULL
@@ -936,7 +937,35 @@ class SearchDialog(QDialog):
                         except Exception:
                             pass
 
-                    set_current_btn.clicked.connect(_set_current_value)
+                    # capture current chk in default args to avoid late-binding of closure
+                    def _set_current_value_captured(btn=None, spin_box=spin, chk=chk):
+                        try:
+                            iface = getattr(self, 'iface', None)
+                            if iface is None and hasattr(self.parent(), 'iface'):
+                                iface = self.parent().iface
+                            if iface is None:
+                                return
+                            try:
+                                canvas = iface.mapCanvas()
+                                rotation = canvas.rotation() if hasattr(canvas, 'rotation') else None
+                            except Exception:
+                                rotation = None
+                            if rotation is None:
+                                return
+                            try:
+                                spin_box.setValue(float(rotation))
+                                try:
+                                    if chk.isChecked():
+                                        chk.setChecked(False)
+                                        spin_box.setDisabled(False)
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+
+                    set_current_btn.clicked.connect(_set_current_value_captured)
 
                     container.addWidget(spin)
                     container.addWidget(chk)
@@ -1011,7 +1040,35 @@ class SearchDialog(QDialog):
                         except Exception:
                             pass
 
-                    set_current_btn.clicked.connect(_set_current_scale)
+                    # capture current chk in default args to avoid late-binding of closure
+                    def _set_current_scale_captured(btn=None, spin_box=spin, chk=chk):
+                        try:
+                            iface = getattr(self, 'iface', None)
+                            if iface is None and hasattr(self.parent(), 'iface'):
+                                iface = self.parent().iface
+                            if iface is None:
+                                return
+                            try:
+                                canvas = iface.mapCanvas()
+                                scale_val = canvas.scale() if hasattr(canvas, 'scale') else None
+                            except Exception:
+                                scale_val = None
+                            if scale_val is None:
+                                return
+                            try:
+                                spin_box.setValue(float(scale_val))
+                                try:
+                                    if chk.isChecked():
+                                        chk.setChecked(False)
+                                        spin_box.setDisabled(False)
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+
+                    set_current_btn.clicked.connect(_set_current_scale_captured)
 
                     container.addWidget(spin)
                     container.addWidget(chk)
@@ -1615,6 +1672,23 @@ class SearchDialog(QDialog):
             # ViewFieldsはすでに編集可能フィールドとして処理されているため、
             # 特別な処理は必要ありません
             
+            # バリデーション: angle が存在する場合は範囲内に収める（JSON直接編集でも安全に）
+            try:
+                if 'angle' in tab_config and tab_config.get('angle') is not None:
+                    try:
+                        a = float(tab_config.get('angle'))
+                        # clamp to [-360, 360]
+                        if a < -360.0:
+                            a = -360.0
+                        if a > 360.0:
+                            a = 360.0
+                        tab_config['angle'] = a
+                    except Exception:
+                        # if not numeric, treat as unspecified
+                        tab_config['angle'] = None
+            except Exception:
+                pass
+
             # 設定を保存
             self._update_config_and_save(tab_config, dialog, all_configs, tab_index)
             
