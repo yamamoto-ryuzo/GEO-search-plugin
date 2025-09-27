@@ -345,6 +345,7 @@ class SearchFeature(object):
                 pass
             return
 
+
         # resolve layer to operate on
         target_layer = layer or self.layer
         if not target_layer:
@@ -592,6 +593,10 @@ class SearchFeature(object):
                             canvas.zoomToSelected(target_layer)
                             QgsMessageLog.logMessage(f"zoom_features: zoomed to selected on layer={layer_name}", "GEO-search-plugin", 0)
                             view_changed = True
+                            try:
+                                self._apply_rotation_if_configured(canvas)
+                            except Exception:
+                                pass
                         except Exception as e:
                             QgsMessageLog.logMessage(f"zoom_features: zoomToSelected failed: {e}", "GEO-search-plugin", 2)
 
@@ -612,6 +617,10 @@ class SearchFeature(object):
                                         pass
                             canvas.refresh()
                             view_changed = True
+                            try:
+                                self._apply_rotation_if_configured(canvas)
+                            except Exception:
+                                pass
                     except Exception as e:
                         try:
                             QgsMessageLog.logMessage(f"zoom_features: center pan failed: {e}", "GEO-search-plugin", 2)
@@ -642,6 +651,10 @@ class SearchFeature(object):
                                         pass
                                 canvas.refresh()
                                 view_changed = True
+                                try:
+                                    self._apply_rotation_if_configured(canvas)
+                                except Exception:
+                                    pass
                         else:
                             center = trans_center if trans_center is not None else bbox.center()
                             if center is not None:
@@ -668,6 +681,10 @@ class SearchFeature(object):
                                     pass
                             canvas.refresh()
                             view_changed = True
+                            try:
+                                self._apply_rotation_if_configured(canvas)
+                            except Exception:
+                                pass
                     except Exception as e:
                         try:
                             QgsMessageLog.logMessage(f"zoom_features: fixed scale (mode4) outer failed: {e}", "GEO-search-plugin", 2)
@@ -724,6 +741,10 @@ class SearchFeature(object):
                                             pass
                                         canvas.setExtent(expanded)
                                         canvas.refresh()
+                                        try:
+                                            self._apply_rotation_if_configured(canvas)
+                                        except Exception:
+                                            pass
                                 except Exception:
                                     pass
 
@@ -763,6 +784,59 @@ class SearchFeature(object):
             except Exception:
                 pass
             return
+
+    def _apply_rotation_if_configured(self, canvas=None):
+        """もし設定に角度があれば、与えられた canvas（または iface.mapCanvas()）に対して回転を適用する。
+        呼び出し元は例外を捕捉するので、このメソッド内でも安全に例外を吸収する。
+        """
+        try:
+            angle = self.setting.get("angle")
+            if angle is None:
+                return
+            try:
+                a = float(angle)
+            except Exception:
+                # 非数値設定は無視
+                return
+            if canvas is None:
+                try:
+                    canvas = self.iface.mapCanvas()
+                except Exception:
+                    canvas = None
+            if canvas is None:
+                return
+            try:
+                # QGIS の Canvas API はバージョンによって差があるため複数候補を試す
+                if hasattr(canvas, 'setRotation'):
+                    canvas.setRotation(a)
+                elif hasattr(canvas, 'setMapRotation'):
+                    canvas.setMapRotation(a)
+                else:
+                    # 明示的なセット関数がなければプロパティに代入してみる
+                    try:
+                        setattr(canvas, 'rotation', a)
+                    except Exception:
+                        pass
+                # UI更新を強制
+                try:
+                    from qgis.PyQt.QtWidgets import QApplication
+                    QApplication.processEvents()
+                except Exception:
+                    pass
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"_apply_rotation_if_configured: applied rotation={a}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"_apply_rotation_if_configured: failed to apply rotation", "GEO-search-plugin", 2)
+                except Exception:
+                    pass
+        except Exception:
+            # 最上位の例外は無視
+            pass
 
     def show_features(self):
         """検索結果を表示する"""
@@ -804,55 +878,7 @@ class SearchFeature(object):
                 QgsMessageLog.logMessage(f"マップテーマAPIエラー: {str(e)}", "GEO-search-plugin", 2)
             except Exception:
                 pass
-        # テーマ適用後に、設定で角度が指定されていれば表示角度を変更する
-        try:
-            angle_val = None
-            try:
-                # setting may contain 'angle' as float or None
-                angle_val = self.setting.get("angle") if isinstance(self.setting, dict) else None
-            except Exception:
-                angle_val = None
-
-            if angle_val is not None:
-                try:
-                    rotation = float(angle_val)
-                    iface = getattr(self, 'iface', None)
-                    if iface is None and hasattr(self, 'parent') and callable(getattr(self, 'parent')):
-                        parent = self.parent()
-                        if parent is not None and hasattr(parent, 'iface'):
-                            iface = parent.iface
-                    if iface is not None:
-                        try:
-                            canvas = iface.mapCanvas()
-                            if hasattr(canvas, 'setRotation'):
-                                canvas.setRotation(rotation)
-                            else:
-                                # older API fallback
-                                try:
-                                    canvas.rotation = rotation
-                                except Exception:
-                                    pass
-                            try:
-                                from qgis.PyQt.QtWidgets import QApplication
-                                QApplication.processEvents()
-                            except Exception:
-                                pass
-                            try:
-                                from qgis.core import QgsMessageLog
-                                QgsMessageLog.logMessage(f"表示角度を {rotation} 度に設定しました", "GEO-search-plugin", 0)
-                            except Exception:
-                                pass
-                        except Exception as e:
-                            try:
-                                from qgis.core import QgsMessageLog
-                                QgsMessageLog.logMessage(f"キャンバス回転設定エラー: {e}", "GEO-search-plugin", 1)
-                            except Exception:
-                                pass
-                except Exception:
-                    # invalid angle value -> ignore
-                    pass
-        except Exception:
-            pass
+        # Rotation is applied after pan/zoom in zoom_features to ensure it happens after view changes
         if not self.layer:
             return
         features = self.search_feature()
