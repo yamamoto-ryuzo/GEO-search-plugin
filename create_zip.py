@@ -53,6 +53,15 @@ def get_plugin_name(metadata_path):
     return 'plugin'
 
 
+def _ignore_pyc_and_pycache(dir, names):
+    """Ignore compiled python files and __pycache__ directories when copying.
+
+    shutil.copytree expects an ignore callable that accepts (dir, names)
+    and returns a sequence of names to ignore.
+    """
+    return {n for n in names if n == '__pycache__' or n.endswith('.pyc')}
+
+
 def remove_old_zip(plugin_name):
     for fname in os.listdir('.'):
         if fname.startswith(plugin_name) and fname.endswith('.zip'):
@@ -102,7 +111,9 @@ def main():
                 src_path = alt
 
         if os.path.isdir(src_path):
-            shutil.copytree(src_path, os.path.join(temp_dir, item))
+            dest_path = os.path.join(temp_dir, item)
+            # copytree will fail if dest exists; dest won't exist here
+            shutil.copytree(src_path, dest_path, ignore=_ignore_pyc_and_pycache)
         elif os.path.isfile(src_path):
             dest = os.path.join(temp_dir, item)
             # ensure destination directory exists
@@ -113,7 +124,12 @@ def main():
 
     with zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(temp_dir):
+            # don't recurse into __pycache__ if any slipped through
+            dirs[:] = [d for d in dirs if d != '__pycache__']
             for file in files:
+                # skip compiled python files
+                if file.endswith('.pyc'):
+                    continue
                 path = os.path.join(root, file)
                 arcname = os.path.relpath(path, temp_dir)
                 zipf.write(path, os.path.join(plugin_base, arcname))
