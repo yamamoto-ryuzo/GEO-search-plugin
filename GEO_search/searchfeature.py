@@ -806,7 +806,35 @@ class SearchFeature(object):
             if canvas is None:
                 return
             try:
-                # QGIS の Canvas API はバージョンによって差があるため複数候補を試す
+                # First, apply scale if configured in JSON 'scale' (takes precedence over fixed_scale attr)
+                try:
+                    scale_val = self.setting.get('scale')
+                    if scale_val is not None:
+                        try:
+                            s = float(scale_val)
+                            # canvas.zoomScale expects a numeric scale (map scale denominator)
+                            # Try canvas.zoomScale, but some APIs may differ; wrap in try/except.
+                            try:
+                                canvas.zoomScale(s)
+                                try:
+                                    from qgis.core import QgsMessageLog
+                                    QgsMessageLog.logMessage(f"_apply_rotation_if_configured: applied scale={s}", "GEO-search-plugin", 0)
+                                except Exception:
+                                    pass
+                            except Exception:
+                                # older/newer APIs or invalid values fallthrough
+                                try:
+                                    # try int fallback
+                                    canvas.zoomScale(int(s))
+                                except Exception:
+                                    pass
+                        except Exception:
+                            # not a numeric scale -> ignore
+                            pass
+                except Exception:
+                    pass
+
+                # Then apply rotation. QGIS の Canvas API はバージョンによって差があるため複数候補を試す
                 if hasattr(canvas, 'setRotation'):
                     canvas.setRotation(a)
                 elif hasattr(canvas, 'setMapRotation'):
@@ -817,12 +845,14 @@ class SearchFeature(object):
                         setattr(canvas, 'rotation', a)
                     except Exception:
                         pass
+
                 # UI更新を強制
                 try:
                     from qgis.PyQt.QtWidgets import QApplication
                     QApplication.processEvents()
                 except Exception:
                     pass
+
                 try:
                     from qgis.core import QgsMessageLog
                     QgsMessageLog.logMessage(f"_apply_rotation_if_configured: applied rotation={a}", "GEO-search-plugin", 0)
