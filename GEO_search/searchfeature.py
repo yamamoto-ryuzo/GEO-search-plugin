@@ -78,9 +78,20 @@ class SearchFeature(object):
             return layer_fields
         fields = layer.fields()
         setting_fields = [fields.indexFromName(field) for field in self.__view_fields]
-        return [
+        valid_fields = [
             layer_fields[fid] for fid in setting_fields if fid != -1
-        ] or layer_fields
+        ]
+        
+        # 指定されたフィールドが存在しない場合は空のリストを返す
+        if not valid_fields and self.__view_fields:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"ViewFields警告: 指定されたフィールドが見つかりません: {self.__view_fields}", "GEO-search-plugin", 1)
+            except Exception:
+                pass
+            return []
+        
+        return valid_fields
 
     @view_fields.setter
     def view_fields(self, fields):
@@ -118,6 +129,30 @@ class SearchFeature(object):
     def load_layers_by_name(self, layer_name):
         """指定した名前の全てのレイヤを取得する"""
         return name2layers(layer_name)
+
+    def _get_view_fields_for_layer(self, layer):
+        """指定されたレイヤに対してViewFields設定を適用する"""
+        if not layer:
+            return []
+        layer_fields = [field for field in layer.fields()]
+        if not self.__view_fields:
+            return layer_fields
+        fields = layer.fields()
+        setting_fields = [fields.indexFromName(field) for field in self.__view_fields]
+        valid_fields = [
+            layer_fields[fid] for fid in setting_fields if fid != -1
+        ]
+        
+        # 指定されたフィールドが存在しない場合は空のリストを返す
+        if not valid_fields and self.__view_fields:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"ViewFields警告 (レイヤ'{layer.name()}'): 指定されたフィールドが見つかりません: {self.__view_fields}", "GEO-search-plugin", 1)
+            except Exception:
+                pass
+            return []
+        
+        return valid_fields
 
     def _search_multiple_layers_by_name(self, layers):
         """同名の複数レイヤを検索して結果を集約する"""
@@ -176,7 +211,9 @@ class SearchFeature(object):
                 except Exception:
                     label = "Results"
                     
-                entry = [layer, layer, label, [field for field in layer.fields()], [feature]]
+                # 各レイヤに対してview_fieldsを適用
+                layer_view_fields = self._get_view_fields_for_layer(layer)
+                entry = [layer, layer, label, layer_view_fields, [feature]]
                 layers_map.append(entry)
             else:
                 entry[4].append(feature)
@@ -1363,7 +1400,9 @@ class SearchTextFeature(SearchFeature):
 
             entry = next((e for e in layers_map if e[0] == key), None)
             if entry is None:
-                entry = [key, layer, label, [field for field in layer.fields()], [feature]]
+                # 各レイヤに対してview_fieldsを適用
+                layer_view_fields = self._get_view_fields_for_layer(layer)
+                entry = [key, layer, label, layer_view_fields, [feature]]
                 layers_map.append(entry)
             else:
                 entry[4].append(feature)
