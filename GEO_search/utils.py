@@ -12,6 +12,13 @@ def name2layer(name):
         return layer
 
 
+def name2layers(name):
+    """指定した名前の全てのレイヤを取得する"""
+    project = QgsProject.instance()
+    layers = project.mapLayersByName(name)
+    return layers
+
+
 def unique_values(layer, field_name):
     fields = layer.fields()
     field_index = fields.indexFromName(field_name)

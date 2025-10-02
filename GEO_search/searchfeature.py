@@ -16,7 +16,7 @@ from qgis.core import (
 from . import jaconv
 
 from .resultdialog import ResultDialog
-from .utils import name2layer, unique_values, get_feature_by_id
+from .utils import name2layer, name2layers, unique_values, get_feature_by_id
 
 
 class SearchFeature(object):
@@ -114,6 +114,76 @@ class SearchFeature(object):
         if layer_type == "Name":
             return name2layer(layer_name)
         return self.create_layer(setting)
+
+    def load_layers_by_name(self, layer_name):
+        """指定した名前の全てのレイヤを取得する"""
+        return name2layers(layer_name)
+
+    def _search_multiple_layers_by_name(self, layers):
+        """同名の複数レイヤを検索して結果を集約する"""
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"同名レイヤ検索: {len(layers)}個のレイヤを検索します", "GEO-search-plugin", 0)
+        except Exception:
+            pass
+            
+        all_features = []
+        all_fields = []
+        
+        for layer in layers:
+            if not layer or not layer.isValid():
+                continue
+                
+            try:
+                features = self._search_on_layer(layer)
+                
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"同名レイヤ検索: レイヤ'{layer.name()}'で{len(features)}件見つかりました", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+                
+                if features:
+                    # レイヤ情報を保持して結果に追加
+                    for f in features:
+                        all_features.append((None, layer, f))
+                        
+            except Exception as e:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"同名レイヤ検索エラー: レイヤ'{layer.name()}'でエラー: {e}", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
+                continue
+        
+        # 結果が見つからない場合
+        if not all_features:
+            self.result_dialog.set_features([], [])
+            self.result_dialog.show()
+            return
+        
+        # レイヤごとに結果をグループ化
+        layers_map = []
+        for node, layer, feature in all_features:
+            # レイヤごとにグループ化（同名でもレイヤインスタンスで区別）
+            entry = next((e for e in layers_map if e[0] == layer), None)
+            if entry is None:
+                try:
+                    layer_name = layer.name()
+                    # 同名レイヤの場合はレイヤIDも含めて区別
+                    layer_id = layer.id()[:8]  # IDの最初の8文字
+                    label = f"{layer_name} ({layer_id})"
+                except Exception:
+                    label = "Results"
+                    
+                entry = [layer, layer, label, [field for field in layer.fields()], [feature]]
+                layers_map.append(entry)
+            else:
+                entry[4].append(feature)
+        
+        # タブ形式で結果を表示
+        self.result_dialog.set_features_by_layer([((e[2], e[1]), e[3], e[4]) for e in layers_map])
+        self.result_dialog.show()
 
     def create_layer(self, setting):
         # FIXME: 読み込み失敗の対処
@@ -1187,7 +1257,18 @@ class SearchTextFeature(SearchFeature):
         return field_name  # 見つからない場合でも元の名前を返す
 
     def show_features(self):
-        """表示レイヤ用の検索処理: タイトルが「表示レイヤ」の場合、現在表示中のベクタレイヤを順に検索して集約表示する"""
+        """検索処理: レイヤ名指定の場合は同名の全レイヤを検索、表示レイヤの場合は現在表示中のベクタレイヤを順に検索して集約表示する"""
+        # レイヤ名指定で同名の複数レイヤがある場合の処理
+        if (self._layer_setting and 
+            isinstance(self._layer_setting, dict) and 
+            self._layer_setting.get("LayerType") == "Name"):
+            layer_name = self._layer_setting.get("Name")
+            if layer_name:
+                same_name_layers = self.load_layers_by_name(layer_name)
+                if len(same_name_layers) > 1:
+                    # 同名の複数レイヤを検索
+                    return self._search_multiple_layers_by_name(same_name_layers)
+        
         # 通常の動作（設定レイヤまたはカレントレイヤ）
         if self.title not in ("表示レイヤ", "全レイヤ"):
             return super(SearchTextFeature, self).show_features()
