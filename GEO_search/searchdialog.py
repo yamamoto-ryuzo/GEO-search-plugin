@@ -1495,7 +1495,7 @@ class SearchDialog(QDialog):
             for field_name, checkbox in checkboxes.items():
                 if checkbox.isChecked():
                     selected_fields.append(field_name)
-            
+
             # 選択がない場合は全フィールド検索
             if not selected_fields:
                 search_field = {"FieldType": "Text"}
@@ -1503,16 +1503,16 @@ class SearchDialog(QDialog):
                 # 「全フィールド検索」が選択されている場合
                 search_field = {"FieldType": "Text", "ViewName": "All", "all": True}
             else:
-                # 複数のフィールドが選択されている場合
+                # 複数または単一フィールドが選択されている場合
                 search_field = {"FieldType": "Text"}
-                
+
                 # ViewName は最初に選択されたフィールドの別名を使用
                 first_field = selected_fields[0]
                 if first_field in field_aliases and field_aliases[first_field] != first_field:
                     view_name = field_aliases[first_field]  # 別名をViewNameに使用
                 else:
                     view_name = first_field  # 別名がなければフィールド名を使用
-                
+
                 # 複数選択の場合、ViewNameを「OR検索」にし、フィールド名も表示
                 if len(selected_fields) > 1:
                     # フィールド名を集約（最大3つまで表示）
@@ -1521,12 +1521,11 @@ class SearchDialog(QDialog):
                     if len(selected_fields) > 3:
                         field_display += f" 他{len(selected_fields)-3}個"
                     view_name = f"OR検索: {field_display}"
-                
+
                 search_field["ViewName"] = view_name
-                
-                # 選択された各フィールドを追加
-                for field_name in selected_fields:
-                    search_field[field_name] = ""
+
+                # 選択されたフィールドをカンマ区切りで1つのキーにまとめる
+                search_field["Field"] = ", ".join(selected_fields)
             
             # コールバック関数を呼び出して結果を返す
             callback(search_field)
