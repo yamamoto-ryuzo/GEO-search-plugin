@@ -480,6 +480,45 @@ class plugin(object):
                                 scale_cmb.editTextChanged.connect(_on_scale_changed)
                             except Exception:
                                 pass
+                            # propagate 'show layer' checkbox state if present in the dialog
+                            try:
+                                show_cbx = getattr(self.dialog, 'showLayerCheckBox', None)
+                                if show_cbx is not None:
+                                    initial = bool(show_cbx.isChecked())
+                                    try:
+                                        for f in self._search_features:
+                                            setattr(f, 'show_layer_name', initial)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        for group, flist in self._search_group_features.items():
+                                            for f in flist:
+                                                setattr(f, 'show_layer_name', initial)
+                                    except Exception:
+                                        pass
+
+                                    def _on_show_toggled(checked=False):
+                                        try:
+                                            for f in self._search_features:
+                                                setattr(f, 'show_layer_name', bool(checked))
+                                            try:
+                                                for group, flist in self._search_group_features.items():
+                                                    for f in flist:
+                                                        setattr(f, 'show_layer_name', bool(checked))
+                                            except Exception:
+                                                pass
+                                        except Exception:
+                                            pass
+
+                                    try:
+                                        show_cbx.toggled.connect(_on_show_toggled)
+                                    except Exception:
+                                        try:
+                                            show_cbx.stateChanged.connect(lambda s: _on_show_toggled(bool(s)))
+                                        except Exception:
+                                            pass
+                            except Exception:
+                                pass
                             try:
                                 scale_cmb.editingFinished.connect(_on_scale_changed)
                             except Exception:
