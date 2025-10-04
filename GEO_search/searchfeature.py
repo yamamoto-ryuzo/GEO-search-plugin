@@ -1134,6 +1134,11 @@ class SearchTextFeature(SearchFeature):
             search_widget.setCompleter(comp)
 
     def search_feature(self, limit=None):
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage("SearchTextFeature.search_feature called", "GEO-search-plugin", 0)
+        except Exception:
+            pass
         layer = self.layer
         if not layer:
             return []
@@ -1163,53 +1168,34 @@ class SearchTextFeature(SearchFeature):
         
         # 検索条件を構築（フィールドタイプを確認して数値なら数値比較にする）
         expres_list = []
-        # build a map of field types for quick lookup
-        field_types = {f.name(): f.type() for f in layer.fields()}
+        for field_name in target_fields:
+            # フィールドタイプに関係なくLIKEで検索
+            expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=search_value))
+
+        # AND/OR演算子をQGIS式に合わせて大文字化
+        andor = self.andor.replace(' Or ', ' OR ').replace(' And ', ' AND ')
+        expression_str = andor.join(expres_list)
+
+        # ログ出力
         try:
-            QgsMessageLog.logMessage(f"field_types_sample={dict(list(field_types.items())[:10])}", "GEO-search-plugin", 0)
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"SearchTextFeature.search_feature: 実行検索式: {expression_str}", "GEO-search-plugin", 0)
         except Exception:
             pass
-        for field_name in target_fields:
-            ftype = field_types.get(field_name)
-            # QGIS field type for string is 10 (QString) in older API; numeric types vary.
-            # If the search_value looks numeric and the field type is numeric, compare as number.
-            is_numeric_field = ftype is not None and ftype not in (10,)
-            # try to coerce search_value to number when appropriate
-            if is_numeric_field:
-                try:
-                    # prefer integer when possible
-                    if str(search_value).isdigit():
-                        nv = int(search_value)
-                    else:
-                        nv = float(search_value)
-                    expres_list.append('"{field}" = {value}'.format(field=field_name, value=nv))
-                except Exception:
-                    # fallback to text comparison if conversion fails
-                    expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=search_value))
-            else:
-                expres_list.append('"{field}" LIKE \'%{value}%\''.format(field=field_name, value=search_value))
-        
-            try:
-                QgsMessageLog.logMessage(f"search_feature: search with fields={target_fields}, value={search_value}", "GEO-search-plugin", 0)
-                QgsMessageLog.logMessage(f"検索式: expres_list={expres_list}", "GEO-search-plugin", 0)
-            except Exception:
-                pass
-        
+
         # クエリを実行
-        expression_str = self.andor.join(expres_list)
         expression = QgsExpression(expression_str)
-        
         if expression.hasEvalError():
             try:
+                from qgis.core import QgsMessageLog
                 QgsMessageLog.logMessage(f"[ERROR] Expression error: {expression.evalErrorString()}", "GEO-search-plugin", 1)
             except Exception:
                 pass
             return []
-        
+
         request = QgsFeatureRequest(expression)
         if limit:
             request.setLimit(limit)
-        
         features = list(layer.getFeatures(request))
         return features
         
@@ -1221,15 +1207,13 @@ class SearchTextFeature(SearchFeature):
             # skip invalid field entries
             if not isinstance(field, dict):
                 continue
-            
+
             # 空dict（全フィールド検索）の場合は文字列フィールドを全て対象にする
             if field == {}:
                 if search_widget.text():  # 入力がある場合のみ
                     val = self.normalize_search_value(search_widget.text())
-                    # 基本は文字列フィールドのみ
                     string_fields = [f.name() for f in self.layer.fields() if f.type() == 10]
                     target_fields.extend(string_fields)
-                    # 入力が数値なら数値フィールドも追加
                     try:
                         is_num = False
                         if str(val).lstrip('-').replace('.', '', 1).isdigit():
@@ -1245,28 +1229,43 @@ class SearchTextFeature(SearchFeature):
                     except Exception:
                         pass
                 break
-            
+
             try:
                 # all フラグがある場合はスキップ
                 if field.get("all"):
                     continue
-                
+
                 # ViewNameが"OR検索:"で始まる場合は、検索フィールド選択ウィザードで選択された複数フィールド
                 view_name = field.get("ViewName", "")
                 if view_name and view_name.startswith("OR検索:"):
-                    # 辞書のキーからViewName, FieldType以外のキーを抽出
-                    for key in field.keys():
-                        if key not in ["ViewName", "FieldType", "all"]:
-                            field_name = self._resolve_field_name(key)
-                            if field_name:
-                                target_fields.append(field_name)
+                    # Fieldキーがカンマ区切りの場合は分割して個別フィールド名として扱う
+                    field_value = field.get("Field")
+                    if field_value and isinstance(field_value, str) and "," in field_value:
+                        for fname in [f.strip() for f in field_value.split(",") if f.strip()]:
+                            resolved = self._resolve_field_name(fname)
+                            if resolved:
+                                target_fields.append(resolved)
+                    else:
+                        # 辞書のキーからViewName, FieldType, all以外のキーを抽出
+                        for key in field.keys():
+                            if key not in ["ViewName", "FieldType", "all", "Field"]:
+                                field_name = self._resolve_field_name(key)
+                                if field_name:
+                                    target_fields.append(field_name)
                 else:
                     # 通常の単一フィールド検索
-                    field_name = field.get("Field") or field.get("ViewName")
-                    field_name = self._resolve_field_name(field_name)
-                    if field_name:
-                        target_fields.append(field_name)
-                        
+                    field_value = field.get("Field")
+                    if field_value and isinstance(field_value, str) and "," in field_value:
+                        for fname in [f.strip() for f in field_value.split(",") if f.strip()]:
+                            resolved = self._resolve_field_name(fname)
+                            if resolved:
+                                target_fields.append(resolved)
+                    else:
+                        field_name = field_value or field.get("ViewName")
+                        field_name = self._resolve_field_name(field_name)
+                        if field_name:
+                            target_fields.append(field_name)
+
             except Exception as e:
                 try:
                     from qgis.core import QgsMessageLog
@@ -1281,17 +1280,21 @@ class SearchTextFeature(SearchFeature):
         """フィールド名を解決する（別名対応）"""
         if not field_name or not self.layer:
             return None
-            
         # フィールド名が存在するかチェック
-        if self.layer.fields().indexFromName(field_name) != -1:
+        idx = self.layer.fields().indexFromName(field_name)
+        if idx != -1:
             return field_name
-            
         # 別名で検索
         for layer_field in self.layer.fields():
             if layer_field.alias() == field_name:
                 return layer_field.name()
-                
-        return field_name  # 見つからない場合でも元の名前を返す
+        # 見つからない場合はNoneを返す
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"[警告] フィールド名解決失敗: {field_name}", "GEO-search-plugin", 1)
+        except Exception:
+            pass
+        return None
 
     def show_features(self):
         """検索処理: レイヤ名指定の場合は同名の全レイヤを検索、表示レイヤの場合は現在表示中のベクタレイヤを順に検索して集約表示する"""
@@ -1314,97 +1317,99 @@ class SearchTextFeature(SearchFeature):
         if self.title == "表示レイヤ":
             layers = self.get_visible_vector_layers()
         else:
-            layers = self.get_all_vector_layers()
-        try:
-            from qgis.core import QgsMessageLog
-            QgsMessageLog.logMessage(f"show_features: target layer items count={len(layers)}", "GEO-search-plugin", 0)
-        except Exception:
-            pass
-        all_features = []
-        all_fields = []
-        for item in layers:
-            # item may be either (node, layer) when coming from get_visible_vector_layers
-            # or a bare layer when coming from get_all_vector_layers. Normalize.
-            node = None
-            if isinstance(item, (list, tuple)) and len(item) >= 2:
-                node, layer = item[0], item[1]
-            else:
-                layer = item
-                node = None
-
-            original_layer_setting = getattr(self, '_layer_setting', None)
-            try:
+            def _get_target_fields(self):
+                """検索対象のフィールドを特定する"""
+                target_fields = []
+                for field, search_widget in zip(self.fields, self.widget.search_widgets):
+                    if not isinstance(field, dict):
+                        continue
+                    # 空dict（全フィールド検索）の場合は文字列フィールドを全て対象にする
+                    if field == {}:
+                        if search_widget.text():
+                            val = self.normalize_search_value(search_widget.text())
+                            string_fields = [f.name() for f in self.layer.fields() if f.type() == 10]
+                            target_fields.extend(string_fields)
+                            try:
+                                is_num = False
+                                if str(val).lstrip('-').replace('.', '', 1).isdigit():
+                                    is_num = True
+                            except Exception:
+                                is_num = False
+                            if is_num:
+                                numeric_fields = [f.name() for f in self.layer.fields() if f.type() != 10]
+                                target_fields.extend(numeric_fields)
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage(f"全フィールド検索: string_fields={string_fields} numeric_included={is_num}", "GEO-search-plugin", 0)
+                            except Exception:
+                                pass
+                        break
+                    try:
+                        if field.get("all"):
+                            continue
+                        view_name = field.get("ViewName", "")
+                        if view_name and view_name.startswith("OR検索:"):
+                            field_value = field.get("Field")
+                            if field_value and isinstance(field_value, str) and "," in field_value:
+                                field_names = [f.strip() for f in field_value.split(",") if f.strip()]
+                                try:
+                                    from qgis.core import QgsMessageLog
+                                    QgsMessageLog.logMessage(f"OR検索: 分割フィールド名={field_names}", "GEO-search-plugin", 0)
+                                except Exception:
+                                    pass
+                                for fname in field_names:
+                                    resolved = self._resolve_field_name(fname)
+                                    try:
+                                        from qgis.core import QgsMessageLog
+                                        QgsMessageLog.logMessage(f"OR検索: 解決後フィールド名={resolved}", "GEO-search-plugin", 0)
+                                    except Exception:
+                                        pass
+                                    if resolved:
+                                        target_fields.append(resolved)
+                            else:
+                                for key in field.keys():
+                                    pass
+                        else:
+                            field_value = field.get("Field")
+                            if field_value and isinstance(field_value, str) and "," in field_value:
+                                field_names = [f.strip() for f in field_value.split(",") if f.strip()]
+                                try:
+                                    from qgis.core import QgsMessageLog
+                                    QgsMessageLog.logMessage(f"通常検索: 分割フィールド名={field_names}", "GEO-search-plugin", 0)
+                                except Exception:
+                                    pass
+                                for fname in field_names:
+                                    resolved = self._resolve_field_name(fname)
+                                    try:
+                                        from qgis.core import QgsMessageLog
+                                        QgsMessageLog.logMessage(f"通常検索: 解決後フィールド名={resolved}", "GEO-search-plugin", 0)
+                                    except Exception:
+                                        pass
+                                    if resolved:
+                                        target_fields.append(resolved)
+                            else:
+                                field_name = field_value or field.get("ViewName")
+                                resolved = self._resolve_field_name(field_name)
+                                try:
+                                    from qgis.core import QgsMessageLog
+                                    QgsMessageLog.logMessage(f"通常検索: 解決後フィールド名={resolved}", "GEO-search-plugin", 0)
+                                except Exception:
+                                    pass
+                                if resolved:
+                                    target_fields.append(resolved)
+                    except Exception as e:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"フィールド処理エラー: {e}", "GEO-search-plugin", 1)
+                        except Exception:
+                            pass
+                        continue
                 try:
                     from qgis.core import QgsMessageLog
-                    node_id = getattr(node, 'layerId', lambda: None)() if node is not None else None
-                    node_name = None
-                    if node is not None:
-                        try:
-                            name_attr = getattr(node, 'name', None)
-                            node_name = name_attr() if callable(name_attr) else name_attr
-                        except Exception:
-                            node_name = None
-                    QgsMessageLog.logMessage(f"show_features: searching node={node_name} node_id={node_id} layer={getattr(layer, 'name', lambda: None)()}", "GEO-search-plugin", 0)
+                    QgsMessageLog.logMessage(f"target_fields={target_fields}", "GEO-search-plugin", 0)
                 except Exception:
                     pass
-
-                features = self._search_on_layer(layer)
-            finally:
-                self._layer_setting = original_layer_setting
-
-            try:
-                from qgis.core import QgsMessageLog
-                QgsMessageLog.logMessage(f"show_features: node={getattr(node, 'name', lambda: None)() if node is not None else 'None'} features_found={len(features)}", "GEO-search-plugin", 0)
-            except Exception:
-                pass
-
-            if features:
-                # preserve node information so duplicates are treated separately
-                for f in features:
-                    all_features.append((node, layer, f))
-
-        # If no results, show empty
-        if not all_features:
-            self.result_dialog.set_features([], [])
-            self.result_dialog.show()
-            return
-
-        # Build per-layer lists for tabbed display
-        # group results per node (or per layer when node is None)
-        layers_map = []
-        for node, layer, feature in all_features:
-            # use node as primary key to distinguish duplicate nodes; fall back to layer
-            key = node if node is not None else layer
-            # compute a human-readable node path label for tab naming
-            label = None
-            if node is not None:
-                try:
-                    parts = []
-                    n = node
-                    while n is not None:
-                        name_attr = getattr(n, 'name', None)
-                        name = name_attr() if callable(name_attr) else name_attr
-                        if name:
-                            parts.insert(0, name)
-                        parent_attr = getattr(n, 'parent', None)
-                        n = parent_attr() if callable(parent_attr) else parent_attr
-                    if parts:
-                        label = "/".join(parts)
-                except Exception:
-                    label = None
-            if not label:
-                try:
-                    label = layer.name() if layer is not None else "Results"
-                except Exception:
-                    label = "Results"
-
-            entry = next((e for e in layers_map if e[0] == key), None)
-            if entry is None:
-                # 各レイヤに対してview_fieldsを適用
-                layer_view_fields = self._get_view_fields_for_layer(layer)
-                entry = [key, layer, label, layer_view_fields, [feature]]
-                layers_map.append(entry)
-            else:
+                return target_fields
                 entry[4].append(feature)
 
         # call new API to set per-layer tabs; pass (label, layer) as the layer value
@@ -1412,6 +1417,11 @@ class SearchTextFeature(SearchFeature):
         self.result_dialog.show()
 
     def _search_on_layer(self, layer):
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage("_search_on_layer called", "GEO-search-plugin", 0)
+        except Exception:
+            pass
         """既存の search_feature ロジックを再利用して与えたレイヤで検索を実行するヘルパー"""
         if not layer or not layer.isValid():
             return []
