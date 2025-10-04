@@ -161,6 +161,105 @@ class SearchDialog(QDialog):
             ]
         return [self.tabWidget.widget(i) for i in range(self.tabWidget.count())]
 
+    def get_current_search_widget(self):
+        """Return the widget instance for the currently visible/search tab (handles grouped tabs)."""
+        try:
+            # If grouped tabs exist, get inner widget
+            if getattr(self, 'tab_groups', None):
+                group_index = self.tabWidget.currentIndex()
+                group_widget = self.tabWidget.widget(group_index)
+                # group_widget may itself be a QTabWidget
+                try:
+                    from qgis.PyQt.QtWidgets import QTabWidget
+                    if isinstance(group_widget, QTabWidget):
+                        tab_index = group_widget.currentIndex()
+                        if tab_index >= 0:
+                            return group_widget.widget(tab_index)
+                except Exception:
+                    pass
+                # fallback: if group_widget is a page, return it
+                return group_widget
+
+            # no grouped tabs: return current top-level page
+            idx = self.tabWidget.currentIndex()
+            if idx >= 0:
+                return self.tabWidget.widget(idx)
+        except Exception:
+            pass
+        return None
+
+    def get_search_values(self):
+        """Return the current search input(s) for the visible tab.
+
+        Returns:
+          - dict (ViewName->value) if mapping possible
+          - list of values otherwise
+          - {'value': ...} for single-line widgets
+        """
+        widget = self.get_current_search_widget()
+        if widget is None:
+            return {}
+
+        # Case 1: widgets with search_widgets (SearchTextWidget family)
+        try:
+            if hasattr(widget, 'search_widgets') and isinstance(widget.search_widgets, (list, tuple)):
+                values = []
+                for w in widget.search_widgets:
+                    try:
+                        if hasattr(w, 'text'):
+                            values.append(w.text())
+                        else:
+                            values.append(None)
+                    except Exception:
+                        values.append(None)
+
+                # try to map to field names if setting describes them
+                try:
+                    fields = None
+                    if hasattr(widget, 'setting') and widget.setting:
+                        s = widget.setting
+                        if isinstance(s, dict):
+                            sf = s.get('SearchFields') or s.get('SearchField')
+                            if isinstance(sf, list):
+                                fields = [f.get('ViewName') or f.get('Field') for f in sf]
+                            elif isinstance(sf, dict):
+                                fields = [sf.get('ViewName') or sf.get('Field')]
+                    if fields and len(fields) == len(values):
+                        return {k: v for k, v in zip(fields, values)}
+                except Exception:
+                    pass
+
+                return values
+        except Exception:
+            pass
+
+        # Case 2: owner widget or single-line widgets exposing line_edit
+        try:
+            if hasattr(widget, 'line_edit'):
+                try:
+                    return {'value': widget.line_edit.text()}
+                except Exception:
+                    return {'value': None}
+        except Exception:
+            pass
+
+        # Final fallback: find any QLineEdit children and return their texts
+        try:
+            from qgis.PyQt.QtWidgets import QLineEdit
+            edits = widget.findChildren(QLineEdit)
+            if edits:
+                vals = []
+                for e in edits:
+                    try:
+                        vals.append(e.text())
+                    except Exception:
+                        vals.append(None)
+                return vals if len(vals) > 1 else (vals[0] if vals else {})
+        except Exception:
+            pass
+
+        return {}
+
     def add_current_layer_to_project_variable(self):
         try:
             try:

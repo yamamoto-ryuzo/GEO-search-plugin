@@ -1145,21 +1145,62 @@ class SearchTextFeature(SearchFeature):
         
         from qgis.core import QgsMessageLog
         
-        # 検索値を取得して正規化
+        # まずダイアログ側からカレントの入力を取得してみる（優先）
         search_value = None
-        for widget in self.widget.search_widgets:
-            value = widget.text()
+        try:
+            dlg = getattr(self.widget, 'dialog', None)
             try:
-                QgsMessageLog.logMessage(f"取得した検索値（正規化前）: {value}", "GEO-search-plugin", 0)
+                QgsMessageLog.logMessage(
+                    f"search_feature: dlg_present={bool(dlg)} widget_id={id(self.widget)} has_get_search_values={bool(dlg and hasattr(dlg, 'get_search_values'))}",
+                    "GEO-search-plugin",
+                    0,
+                )
             except Exception:
                 pass
-            if value:
-                search_value = self.normalize_search_value(value)
+            if dlg and hasattr(dlg, 'get_search_values'):
+                vals = dlg.get_search_values()
                 try:
-                    QgsMessageLog.logMessage(f"取得した検索値（正規化後）: {search_value}", "GEO-search-plugin", 0)
+                    QgsMessageLog.logMessage(f"search_feature: dlg.get_search_values returned: {vals}", "GEO-search-plugin", 0)
                 except Exception:
                     pass
-                break
+                # vals may be dict, list/tuple, or single value
+                if isinstance(vals, dict):
+                    for v in vals.values():
+                        if v:
+                            search_value = self.normalize_search_value(v)
+                            break
+                elif isinstance(vals, (list, tuple)):
+                    for v in vals:
+                        if v:
+                            search_value = self.normalize_search_value(v)
+                            break
+                elif isinstance(vals, str):
+                    if vals:
+                        search_value = self.normalize_search_value(vals)
+        except Exception:
+            search_value = None
+
+        # ダイアログ取得で値がなければ従来の widget.search_widgets を参照（フォールバック）
+        if not search_value:
+            try:
+                for widget in getattr(self.widget, 'search_widgets', []):
+                    try:
+                        value = widget.text()
+                    except Exception:
+                        value = None
+                    try:
+                        QgsMessageLog.logMessage(f"取得した検索値（正規化前）: {value}", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+                    if value:
+                        search_value = self.normalize_search_value(value)
+                        try:
+                            QgsMessageLog.logMessage(f"取得した検索値（正規化後）: {search_value}", "GEO-search-plugin", 0)
+                        except Exception:
+                            pass
+                        break
+            except Exception:
+                search_value = None
         
         if not search_value:
             return []  # 検索値がなければ何も返さない

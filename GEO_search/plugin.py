@@ -375,6 +375,17 @@ class plugin(object):
                 self._current_group_widget = self.dialog.tabWidget
                 self.dialog.tabWidget.currentChanged.connect(self.change_search_feature)
 
+            # Connect search button to wrapper that ensures current_feature.widget is set to current UI
+            try:
+                # disconnect any previous direct connections to features
+                try:
+                    self.dialog.searchButton.clicked.disconnect()
+                except Exception:
+                    pass
+                self.dialog.searchButton.clicked.connect(self._invoke_current_feature)
+            except Exception:
+                pass
+
             # If panModeComboBox exists in the dialog UI, propagate its value to features
             try:
                 cmb = getattr(self.dialog, 'panModeComboBox', None)
@@ -558,16 +569,56 @@ class plugin(object):
 
     def change_search_feature(self, index):
         if self.current_feature:
-            self.current_feature.unload()
-            self.dialog.searchButton.clicked.disconnect(
-                self.current_feature.show_features
-            )
+            try:
+                self.current_feature.unload()
+            except Exception:
+                pass
         if len(self._search_features) <= index:
             return
         self.current_feature = self._search_features[index]
-        self.current_feature.load()
-        self.dialog.searchButton.clicked.connect(self.current_feature.show_features)
-        self.dialog.searchButton.setEnabled(self.current_feature.widget.isEnabled())
+        try:
+            self.current_feature.load()
+        except Exception:
+            pass
+        # Ensure search button enabled state follows the widget availability
+        try:
+            self.dialog.searchButton.setEnabled(self.current_feature.widget.isEnabled())
+        except Exception:
+            try:
+                # fallback: enable button
+                self.dialog.searchButton.setEnabled(True)
+            except Exception:
+                pass
+
+
+    def _invoke_current_feature(self):
+        """Wrapper called when search button is pressed.
+
+        It ensures current_feature.widget points to the dialog's current page widget
+        so the search reads the current UI values.
+        """
+        try:
+            if not hasattr(self, 'dialog') or not self.dialog:
+                return
+            # pick current visible widget from dialog
+            try:
+                cur = self.dialog.get_current_search_widget()
+            except Exception:
+                cur = None
+            if self.current_feature is not None and cur is not None:
+                try:
+                    # Set feature's widget to the current visible widget so its .search_widgets reflect current UI
+                    setattr(self.current_feature, 'widget', cur)
+                except Exception:
+                    pass
+            # finally invoke feature's show_features
+            if self.current_feature is not None:
+                try:
+                    self.current_feature.show_features()
+                except Exception:
+                    pass
+        except Exception:
+            pass
         
     # 以前のイベントフィルタ関連メソッドは不要になったため削除
     # activatedシグナルが同じ項目選択も検出するため、これらのメソッドは不要
