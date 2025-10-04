@@ -851,6 +851,15 @@ class SearchFeature(object):
                             self._apply_rotation_if_configured(canvas)
                         except Exception:
                             pass
+                        try:
+                            # only ensure layer visibility when feature property show_layer_name is True
+                            if getattr(self, 'show_layer_name', False):
+                                try:
+                                    self._ensure_layer_visible(target_layer)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -868,6 +877,15 @@ class SearchFeature(object):
                                     pass
                                 try:
                                     self._apply_rotation_if_configured(canvas)
+                                except Exception:
+                                    pass
+                                try:
+                                    # only ensure layer visibility when feature property show_layer_name is True
+                                    if getattr(self, 'show_layer_name', False):
+                                        try:
+                                            self._ensure_layer_visible(target_layer)
+                                        except Exception:
+                                            pass
                                 except Exception:
                                     pass
                                 return
@@ -1005,6 +1023,79 @@ class SearchFeature(object):
             except Exception:
                 pass
         except Exception:
+            pass
+
+    def _ensure_layer_visible(self, layer):
+        """指定したレイヤをレイヤツリー上で可視化する（見えない場合は表示する）。
+        失敗しても例外を投げず安全に終わる実装にする。
+        """
+        try:
+            if layer is None:
+                return
+            try:
+                from qgis.core import QgsProject, QgsMessageLog
+            except Exception:
+                return
+
+            try:
+                root = QgsProject.instance().layerTreeRoot()
+            except Exception:
+                return
+
+            try:
+                lid = layer.id() if hasattr(layer, 'id') else None
+            except Exception:
+                lid = None
+
+            node = None
+            try:
+                if lid:
+                    node = root.findLayer(lid)
+            except Exception:
+                node = None
+
+            # fallback: iterate nodes to find matching layer object
+            if node is None:
+                try:
+                    for n in root.findLayers():
+                        try:
+                            if n.layer() is layer:
+                                node = n
+                                break
+                        except Exception:
+                            continue
+                except Exception:
+                    node = None
+
+            if node is not None:
+                try:
+                    # set item visible for the layer node and all its parent groups
+                    cur = node
+                    while cur is not None:
+                        try:
+                            # set visibility on this node (works for layer and group nodes)
+                            cur.setItemVisibilityChecked(True)
+                        except Exception:
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage(f"_ensure_layer_visible: failed to set visibility on node {cur}", "GEO-search-plugin", 1)
+                            except Exception:
+                                pass
+                        try:
+                            cur = cur.parent()
+                        except Exception:
+                            break
+                    try:
+                        QgsMessageLog.logMessage(f"_ensure_layer_visible: set visible layer id={lid} name={getattr(layer, 'name', lambda: 'unknown')()}", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+                except Exception:
+                    try:
+                        QgsMessageLog.logMessage(f"_ensure_layer_visible: failed to set visible for layer id={lid}", "GEO-search-plugin", 2)
+                    except Exception:
+                        pass
+        except Exception:
+            # swallow all errors
             pass
 
     def show_features(self):
