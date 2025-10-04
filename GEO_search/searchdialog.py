@@ -29,8 +29,7 @@ class SearchDialog(QDialog):
         directory = os.path.join(os.path.dirname(__file__), "ui")
         ui_file = os.path.join(directory, UI_FILE)
         uic.loadUi(ui_file, self)
-        # タブIDとプロジェクト変数IDのマッピングを保持するディクショナリ
-        self.tab_id_mapping = {}
+    # Note: ID-based mapping removed. Matching will use Title+group heuristics.
         self.init_gui(setting)
         # Connect add layer button if present
         try:
@@ -71,30 +70,13 @@ class SearchDialog(QDialog):
         for i, tab_setting in enumerate(setting["SearchTabs"]):
             page = self.create_page(tab_setting)
             
-            # タブ設定からプロジェクト変数のIDを取得、なければユニークなIDを生成
-            if "id" in tab_setting:
-                project_id = tab_setting["id"]
-            else:
-                # 既存設定にIDがない場合はユニークなIDを生成
-                import uuid
-                project_id = str(uuid.uuid4())
-                # 設定にIDを追加（将来の使用のため）
-                tab_setting["id"] = project_id
-            
-            # 非表示のユニークIDをページに設定
-            page.setProperty("project_id", project_id)
-            
+            # Do not use per-tab "id" mapping. Rely on Title and group for matching.
             if self.tab_groups:
                 group_name = tab_setting.get("group", OTHER_GROUP_NAME)
                 tab_group_widget = self.tab_groups[group_name]
                 tab_index = tab_group_widget.addTab(page, tab_setting["Title"])
-                # タブIDとプロジェクト変数IDのマッピングを保存
-                tab_key = f"{group_name}:{tab_index}"
-                self.tab_id_mapping[tab_key] = project_id
             else:
                 tab_index = self.tabWidget.addTab(page, tab_setting["Title"])
-                # タブIDとプロジェクト変数IDのマッピングを保存
-                self.tab_id_mapping[str(tab_index)] = project_id
             
             # 親のプラグインインスタンスがある場合、current_layersリストを更新
             try:
@@ -115,22 +97,8 @@ class SearchDialog(QDialog):
         text = self.tabWidget.tabText(index)
         self.setWindowTitle("地図検索: " + text)
 
-    def get_tab_project_id(self, tab_widget, tab_key=None):
-        """タブに関連付けられたプロジェクト変数IDを取得します"""
-        project_id = None
-        
-        # 1. タブキーが指定されていれば、マッピングから検索
-        if tab_key and tab_key in self.tab_id_mapping:
-            project_id = self.tab_id_mapping.get(tab_key)
-            
-        # 2. タブウィジェットから直接プロパティを取得
-        if project_id is None and tab_widget and hasattr(tab_widget, 'property'):
-            try:
-                project_id = tab_widget.property("project_id")
-            except Exception:
-                pass
-                
-        return project_id
+    # ID-based project id helpers removed. Matching is done by Title and group when
+    # updating/removing entries from project variables.
         
     def create_page(self, setting):
         if setting["Title"] == "地番検索":
@@ -299,12 +267,9 @@ class SearchDialog(QDialog):
             # Setting "SearchField" to an empty dict {} will be interpreted
             # by the widget as the All-field and cause full-text search logic to run.
             
-            # より確実なユニークIDを生成（完全なUUIDを使用）
-            import uuid
-            unique_id = str(uuid.uuid4())
-            
+            # Create standard JSON for the current layer. Do NOT add an 'id' field;
+            # matching will be performed by Title+group only.
             standard_json = {
-                "id": unique_id,  # プロジェクト変数にユニークIDを設定
                 "group": "ﾌﾟﾛｼﾞｪｸﾄ検索",
                 "Title": layer_name,
                 "Layer": {"LayerType": "Name", "Name": layer_name},
@@ -518,7 +483,6 @@ class SearchDialog(QDialog):
             # 選択されているタブの情報を取得
             current_tab = None
             current_tab_title = None
-            project_id = None
             tab_key = None
             
             # 親タブがグループタブかどうかをチェック
@@ -534,24 +498,15 @@ class SearchDialog(QDialog):
                     if tab_index >= 0:
                         current_tab = current_group_widget.widget(tab_index)
                         current_tab_title = current_group_widget.tabText(tab_index)
-                        # マッピングから対応するプロジェクト変数IDを取得
-                        tab_key = f"{current_group_name}:{tab_index}"
-                        project_id = self.tab_id_mapping.get(tab_key)
-                        # タブからプロパティも取得（バックアップとして）
-                        if project_id is None and hasattr(current_tab, 'property'):
-                            project_id = current_tab.property("project_id")
+                        # No longer using per-tab IDs; we'll match by Title+group when
+                        # updating project variables.
             else:
                 # 通常のタブの場合、選択されているタブを取得
                 tab_index = self.tabWidget.currentIndex()
                 if tab_index >= 0:
                     current_tab = self.tabWidget.widget(tab_index)
                     current_tab_title = self.tabWidget.tabText(tab_index)
-                    # マッピングから対応するプロジェクト変数IDを取得
-                    tab_key = str(tab_index)
-                    project_id = self.tab_id_mapping.get(tab_key)
-                    # タブからプロパティも取得（バックアップとして）
-                    if project_id is None and hasattr(current_tab, 'property'):
-                        project_id = current_tab.property("project_id")
+                    # No per-tab ID lookup. Use Title-based matching when editing/removing.
                     
             # タブが選択されていなければ終了
             if current_tab is None or current_tab_title is None:
@@ -584,50 +539,24 @@ class SearchDialog(QDialog):
                 if not isinstance(parsed, list):
                     parsed = [parsed]
                     
-                # タブを削除する前に必要に応じて追加のプロパティを取得
-                try:
-                    if not project_id and hasattr(current_tab, 'property'):
-                        project_id = current_tab.property("project_id")
-                except Exception as e:
-                    try:
-                        from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Error getting tab property: {e}", "GEO-search-plugin", 1)
-                    except Exception:
-                        print(f"Error getting tab property: {e}")
+                # No per-tab project_id property to consider; matching will use Title+group.
                         
                 # 注: タブのUI削除は行わず、プロジェクト変数から削除した後に
                 # reload_uiメソッドによってUIが再構築される
                 
-                # まずIDがある場合は優先的にIDで検索
-                if project_id:
-                    # IDを使用して特定のアイテムのみを削除
-                    updated_settings = [item for item in parsed if item.get("id") != project_id]
-                    
-                    # IDでの検索で見つからなかった場合はタイトルで検索（後方互換性のため）
-                    if len(updated_settings) == len(parsed):
-                        found_item = None
-                        for item in parsed:
-                            if item.get("Title") == current_tab_title:
-                                found_item = item
-                                break
-                        
-                        if found_item:
-                            # 見つかったアイテムを削除
-                            updated_settings = [item for item in parsed if item is not found_item]
-                        else:
-                            # 見つからない場合は変更なし
-                            updated_settings = parsed
-                else:
-                    # ID情報がない場合はタイトルで検索（後方互換性のため）
-                    updated_settings = [item for item in parsed if item.get("Title") != current_tab_title]
+                # Match by Title and group (IDs removed). Remove entries whose Title matches
+                # the currently selected tab title. This intentionally ignores any 'id'
+                # fields in the stored JSON and prefers Title-based matching for
+                # backward/forward compatibility when group names change.
+                updated_settings = [item for item in parsed if item.get("Title") != current_tab_title]
                 
                 # 変更があったかチェック
                 if len(updated_settings) == len(parsed):
                     try:
                         from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Tab '{current_tab_title}' (ID: {project_id}) not found in project variables", "GEO-search-plugin", 1)
+                        QgsMessageLog.logMessage(f"Tab '{current_tab_title}' not found in project variables", "GEO-search-plugin", 1)
                     except Exception:
-                        print(f"Tab '{current_tab_title}' (ID: {project_id}) not found in project variables")
+                        print(f"Tab '{current_tab_title}' not found in project variables")
                     # プロジェクト変数に該当する設定が見つからなかった場合も続行
                     
                 # 更新された設定をJSONに変換（空リストの場合は空文字列に）
@@ -673,9 +602,7 @@ class SearchDialog(QDialog):
                 except Exception as err:
                     print(f"setCustomProperty failed: {err}")
                     
-                # プロジェクト変数の削除が完了した後、タブIDマッピングもクリア
-                if tab_key and tab_key in self.tab_id_mapping:
-                    del self.tab_id_mapping[tab_key]
+                # No tab_id_mapping to clear since ID-based mapping was removed.
                 
                 # 共通のUIリロードメソッドを呼び出し
                 # これにより、プロジェクト変数に基づいてUIが再構築される
@@ -708,7 +635,6 @@ class SearchDialog(QDialog):
             current_tab = None
             current_tab_title = None
             current_tab_index = -1
-            project_id = None
             tab_key = None
             
             # 親タブがグループタブかどうかをチェック
@@ -724,12 +650,7 @@ class SearchDialog(QDialog):
                     if tab_index >= 0:
                         current_tab = current_group_widget.widget(tab_index)
                         current_tab_title = current_group_widget.tabText(tab_index)
-                        # マッピングから対応するプロジェクト変数IDを取得
-                        tab_key = f"{current_group_name}:{tab_index}"
-                        project_id = self.tab_id_mapping.get(tab_key)
-                        # タブからプロパティも取得（バックアップとして）
-                        if project_id is None and hasattr(current_tab, 'property'):
-                            project_id = current_tab.property("project_id")
+                        # No per-tab mapping; matching will be done by Title+group.
             else:
                 # 通常のタブの場合、選択されているタブを取得
                 tab_index = self.tabWidget.currentIndex()
@@ -737,12 +658,7 @@ class SearchDialog(QDialog):
                     current_tab = self.tabWidget.widget(tab_index)
                     current_tab_title = self.tabWidget.tabText(tab_index)
                     current_tab_index = tab_index
-                    # マッピングから対応するプロジェクト変数IDを取得
-                    tab_key = str(tab_index)
-                    project_id = self.tab_id_mapping.get(tab_key)
-                    # タブからプロパティも取得（バックアップとして）
-                    if project_id is None and hasattr(current_tab, 'property'):
-                        project_id = current_tab.property("project_id")
+                    # No per-tab mapping; matching will be done by Title+group.
             
             # タブが選択されていなければ終了
             if current_tab is None or current_tab_title is None:
@@ -782,39 +698,17 @@ class SearchDialog(QDialog):
                 
                 # プロジェクト変数IDがある場合は優先的にIDを使用して検索
                 # まずIDで検索
-                if project_id:
-                    for i, config in enumerate(parsed):
-                        if config.get("id") == project_id:
-                            tab_config = config
-                            tab_index_in_config = i
-                            break
-                
-                # IDで見つからない場合はタイトルで検索（後方互換性のため）
-                if tab_config is None:
-                    for i, config in enumerate(parsed):
-                        if config.get("Title") == current_tab_title:
-                            tab_config = config
-                            tab_index_in_config = i
-                            # IDが設定されていない場合は、ここでIDを設定
-                            if project_id and "id" not in tab_config:
-                                tab_config["id"] = project_id
-                            break
+                # Match by Title and group (IDs removed). Prefer exact Title match.
+                for i, config in enumerate(parsed):
+                    if config.get("Title") == current_tab_title:
+                        tab_config = config
+                        tab_index_in_config = i
+                        break
                 
                 # 設定が見つからなければ、現在のタブに基づいて新しい設定を作成
                 if tab_config is None:
-                    # より確実なユニークIDを生成（完全なUUIDを使用）、まだ存在しない場合
-                    if not project_id:
-                        import uuid
-                        project_id = str(uuid.uuid4())
-                        
-                        # タブに属性として設定し、マッピングにも追加
-                        if current_tab and hasattr(current_tab, 'setProperty'):
-                            current_tab.setProperty("project_id", project_id)
-                        if tab_key:
-                            self.tab_id_mapping[tab_key] = project_id
-                    
+                    # Create a default tab_config based on current tab title.
                     tab_config = {
-                        "id": project_id,  # 新規設定にIDを追加
                         "Title": current_tab_title,
                         "Layer": {},
                         "SearchField": {},
