@@ -692,6 +692,7 @@ class SearchFeature(object):
                 from qgis.core import QgsMessageLog
                 QgsMessageLog.logMessage(f"zoom_features: mode={mode} canvas_present={canvas is not None}", "GEO-search-plugin", 0)
                 view_changed = False
+                animation_scheduled = False
 
                 # 0: zoom to selected (default)
                 if mode == 0:
@@ -700,10 +701,6 @@ class SearchFeature(object):
                             canvas.zoomToSelected(target_layer)
                             QgsMessageLog.logMessage(f"zoom_features: zoomed to selected on layer={layer_name}", "GEO-search-plugin", 0)
                             view_changed = True
-                            try:
-                                self._apply_rotation_if_configured(canvas)
-                            except Exception:
-                                pass
                         except Exception as e:
                             QgsMessageLog.logMessage(f"zoom_features: zoomToSelected failed: {e}", "GEO-search-plugin", 2)
 
@@ -724,10 +721,6 @@ class SearchFeature(object):
                                         pass
                             canvas.refresh()
                             view_changed = True
-                            try:
-                                self._apply_rotation_if_configured(canvas)
-                            except Exception:
-                                pass
                     except Exception as e:
                         try:
                             QgsMessageLog.logMessage(f"zoom_features: center pan failed: {e}", "GEO-search-plugin", 2)
@@ -758,10 +751,6 @@ class SearchFeature(object):
                                         pass
                                 canvas.refresh()
                                 view_changed = True
-                                try:
-                                    self._apply_rotation_if_configured(canvas)
-                                except Exception:
-                                    pass
                         else:
                             center = trans_center if trans_center is not None else bbox.center()
                             if center is not None:
@@ -775,23 +764,9 @@ class SearchFeature(object):
                                         canvas.centerAt(center.x(), center.y())
                                     except Exception:
                                         pass
-                            # apply the provided fixed scale
-                            try:
-                                if isinstance(fs, int) and fs > 0:
-                                    canvas.zoomScale(fs)
-                                else:
-                                    canvas.zoomScale(5000)
-                            except Exception:
-                                try:
-                                    canvas.zoomScale(10000)
-                                except Exception:
-                                    pass
+                            # center and refresh; scale/rotation will be applied once after mode dispatch
                             canvas.refresh()
                             view_changed = True
-                            try:
-                                self._apply_rotation_if_configured(canvas)
-                            except Exception:
-                                pass
                     except Exception as e:
                         try:
                             QgsMessageLog.logMessage(f"zoom_features: fixed scale (mode4) outer failed: {e}", "GEO-search-plugin", 2)
@@ -848,21 +823,36 @@ class SearchFeature(object):
                                             pass
                                         canvas.setExtent(expanded)
                                         canvas.refresh()
-                                        try:
-                                            self._apply_rotation_if_configured(canvas)
-                                        except Exception:
-                                            pass
+                                        # (Previously applied scale/rotation here on animation completion.)
+                                        # Centralized application after mode dispatch will handle both animated
+                                        # and non-animated modes, so do not apply here to avoid duplication.
                                 except Exception:
                                     pass
 
                         for s in range(steps):
                             QTimer.singleShot(s * interval, _step)
                         view_changed = True
+                        animation_scheduled = True
                     except Exception as e:
                         try:
                             QgsMessageLog.logMessage(f"zoom_features: animated pan failed: {e}", "GEO-search-plugin", 2)
                         except Exception:
                             pass
+
+                # after mode dispatch: if a view change happened and no animation is scheduled,
+                # apply scale and rotation once here (centralized)
+                try:
+                    if canvas is not None and view_changed:
+                        try:
+                            self._apply_scale_if_configured(canvas)
+                        except Exception:
+                            pass
+                        try:
+                            self._apply_rotation_if_configured(canvas)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
                 # if nothing changed the view, try a final forced zoomToSelected
                 if not view_changed:
@@ -871,6 +861,15 @@ class SearchFeature(object):
                             try:
                                 canvas.zoomToSelected(target_layer)
                                 QgsMessageLog.logMessage(f"zoom_features: fallback zoomToSelected on layer={layer_name}", "GEO-search-plugin", 0)
+                                # apply scale/rotation for fallback path as well
+                                try:
+                                    self._apply_scale_if_configured(canvas)
+                                except Exception:
+                                    pass
+                                try:
+                                    self._apply_rotation_if_configured(canvas)
+                                except Exception:
+                                    pass
                                 return
                             except Exception as e:
                                 QgsMessageLog.logMessage(f"zoom_features: fallback zoomToSelected failed: {e}", "GEO-search-plugin", 2)
@@ -905,6 +904,7 @@ class SearchFeature(object):
             except Exception:
                 # 非数値設定は無視
                 return
+
             if canvas is None:
                 try:
                     canvas = self.iface.mapCanvas()
@@ -912,36 +912,9 @@ class SearchFeature(object):
                     canvas = None
             if canvas is None:
                 return
-            try:
-                # First, apply scale if configured in JSON 'scale' (takes precedence over fixed_scale attr)
-                try:
-                    scale_val = self.setting.get('scale')
-                    if scale_val is not None:
-                        try:
-                            s = float(scale_val)
-                            # canvas.zoomScale expects a numeric scale (map scale denominator)
-                            # Try canvas.zoomScale, but some APIs may differ; wrap in try/except.
-                            try:
-                                canvas.zoomScale(s)
-                                try:
-                                    from qgis.core import QgsMessageLog
-                                    QgsMessageLog.logMessage(f"_apply_rotation_if_configured: applied scale={s}", "GEO-search-plugin", 0)
-                                except Exception:
-                                    pass
-                            except Exception:
-                                # older/newer APIs or invalid values fallthrough
-                                try:
-                                    # try int fallback
-                                    canvas.zoomScale(int(s))
-                                except Exception:
-                                    pass
-                        except Exception:
-                            # not a numeric scale -> ignore
-                            pass
-                except Exception:
-                    pass
 
-                # Then apply rotation. QGIS の Canvas API はバージョンによって差があるため複数候補を試す
+            try:
+                # QGIS の Canvas API はバージョンによって差があるため複数候補を試す
                 if hasattr(canvas, 'setRotation'):
                     canvas.setRotation(a)
                 elif hasattr(canvas, 'setMapRotation'):
@@ -973,6 +946,65 @@ class SearchFeature(object):
                     pass
         except Exception:
             # 最上位の例外は無視
+            pass
+
+    def _apply_scale_if_configured(self, canvas=None):
+        """設定（JSON の 'scale' または feature の fixed_scale 属性）に従ってスケールを適用する。
+        JSON の 'scale' が優先され、なければ self.fixed_scale を使う。canvas が None の場合は iface.mapCanvas() を取得する。
+        """
+        try:
+            if canvas is None:
+                try:
+                    canvas = self.iface.mapCanvas()
+                except Exception:
+                    canvas = None
+            if canvas is None:
+                return
+
+            # JSON 設定の 'scale' を優先
+            try:
+                scale_val = self.setting.get('scale')
+            except Exception:
+                scale_val = None
+
+            applied = False
+            if scale_val is not None:
+                try:
+                    s = float(scale_val)
+                    try:
+                        canvas.zoomScale(s)
+                        applied = True
+                    except Exception:
+                        try:
+                            canvas.zoomScale(int(s))
+                            applied = True
+                        except Exception:
+                            applied = False
+                except Exception:
+                    applied = False
+
+            # JSON 設定がなければインスタンス属性 fixed_scale を参照
+            if not applied:
+                try:
+                    fs = getattr(self, 'fixed_scale', None)
+                except Exception:
+                    fs = None
+                if fs is not None:
+                    try:
+                        if isinstance(fs, (int, float)) and fs > 0:
+                            canvas.zoomScale(fs)
+                            applied = True
+                    except Exception:
+                        applied = False
+
+            # 最低限のフォールバック値は設定しない（既存のコードは各分岐でフォールバックしていたため）
+            try:
+                from qgis.core import QgsMessageLog
+                if applied:
+                    QgsMessageLog.logMessage(f"_apply_scale_if_configured: applied scale={scale_val if scale_val is not None else getattr(self, 'fixed_scale', None)}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+        except Exception:
             pass
 
     def show_features(self):
