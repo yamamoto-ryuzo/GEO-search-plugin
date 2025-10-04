@@ -1149,8 +1149,16 @@ class SearchTextFeature(SearchFeature):
         search_value = None
         for widget in self.widget.search_widgets:
             value = widget.text()
+            try:
+                QgsMessageLog.logMessage(f"取得した検索値（正規化前）: {value}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
             if value:
                 search_value = self.normalize_search_value(value)
+                try:
+                    QgsMessageLog.logMessage(f"取得した検索値（正規化後）: {search_value}", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
                 break
         
         if not search_value:
