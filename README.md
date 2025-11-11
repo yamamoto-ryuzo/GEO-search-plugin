@@ -386,17 +386,17 @@ QGISで読み込んでいるレイヤを検索対象とする。
 ## 検索ロジック（実装概要）
 
 ### 通常検索（全文検索風）　SearchTextFeature
-  - 実装ファイル: `GEO_search/widget/searchwidget.py` (`SearchTextWidget`) と `GEO_search/searchfeature.py` (`SearchTextFeature`).
+  - 実装ファイル: `geo_search/widget/searchwidget.py` (`SearchTextWidget`) と `geo_search/searchfeature.py` (`SearchTextFeature`).
   - 動作: 検索ボックスに入力された最初の非空値を取得し、設定された検索フィールド（`SearchField` または `SearchFields`）に対して SQL の LIKE 相当の条件を組み立てます。複数フィールドは OR/AND（設定に依存）で結合され、QGIS の `QgsExpression` を用いて `QgsFeatureRequest` に渡して検索します。
   - 正規化: `SearchFeature.normalize_search_value` により全角英数字を半角に変換します。
 
 ### 地番検索（地籍検索）　SearchTibanFeature
-  - 実装ファイル: `GEO_search/widget/searchwidget.py` (`SearchTibanWidget`) と `GEO_search/searchfeature.py` (`SearchTibanFeature`).
+  - 実装ファイル: `geo_search/widget/searchwidget.py` (`SearchTibanWidget`) と `geo_search/searchfeature.py` (`SearchTibanFeature`).
   - 動作: 地番用の入力を受け取り、地番属性（`TibanField`）に対する正規表現マッチや、個別フィールドに対する完全一致／あいまい（近傍番号）検索をサポートします。あいまい検索では数値幅（FUZZY）を用いた幅のあるヒットを生成します。地番フィールドは正規表現（`regexp_match`）でマッチングされます。
   - 補助機能: 字コード（`AzaTable`）を読み込んで候補をテーブル表示し、選択で入力欄にセットします。
 
 ### 所有者検索（氏名検索）　SearchOwnerFeature
-  - 実装ファイル: `GEO_search/widget/searchwidget.py` (`SearchOwnerWidget`) と `GEO_search/searchfeature.py` (`SearchOwnerFeature`).
+  - 実装ファイル: `geo_search/widget/searchwidget.py` (`SearchOwnerWidget`) と `geo_search/searchfeature.py` (`SearchOwnerFeature`).
   - 動作: 複数フィールドをチェックボタンで選択して検索できます。全角カナ→半角カナや濁音／拗音の変換処理を行い、`replace(... ) LIKE '{value}'` のような式で空白除去やカナ正規化を行った比較を実行します。前方一致／部分一致の切替もサポートします。
 
 ### 表示レイヤ検索／全レイヤ検索

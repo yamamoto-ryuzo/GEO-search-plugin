@@ -125,6 +125,21 @@ class plugin(object):
             except:
                 pass
 
+    def _safe_current_text(self, widget):
+        """Safely return currentText() from a combo-like widget or empty string.
+
+        This avoids crashing when the widget is None or currentText() returns None.
+        """
+        try:
+            if widget is None:
+                return ""
+            if hasattr(widget, 'currentText'):
+                t = widget.currentText()
+                return t if t is not None else ""
+        except Exception:
+            pass
+        return ""
+
     def update_theme_combobox(self):
         """マップテーマのコンボボックスを更新する"""
         try:
@@ -132,9 +147,16 @@ class plugin(object):
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
             themes = theme_collection.mapThemes()
-            
-            # 現在選択されているテーマを保存
-            current_theme = self.theme_combobox.currentText()
+            # safety: theme_combobox may not exist (initGui not yet run or unloaded)
+            if not hasattr(self, 'theme_combobox') or self.theme_combobox is None:
+                try:
+                    QgsMessageLog.logMessage("update_theme_combobox: theme_combobox is not available", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
+                return
+
+            # 現在選択されているテーマを保存（安全に取得）
+            current_theme = self._safe_current_text(self.theme_combobox)
             
             # コンボボックスをクリア
             self.theme_combobox.blockSignals(True)
@@ -178,9 +200,16 @@ class plugin(object):
             from qgis.core import QgsProject, QgsMessageLog
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
-            
-            # 現在のテーマテキストを取得
-            current_theme_text = self.theme_combobox.currentText()
+            # safety: theme_combobox may not exist
+            if not hasattr(self, 'theme_combobox') or self.theme_combobox is None:
+                try:
+                    QgsMessageLog.logMessage("apply_selected_theme: theme_combobox is not available", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
+                return
+
+            # 現在のテーマテキストを取得（安全に取得）
+            current_theme_text = self._safe_current_text(self.theme_combobox)
             
             # 「テーマ選択」の場合は何もしない
             if current_theme_text == "テーマ選択" or index <= 0:
@@ -435,7 +464,7 @@ class plugin(object):
                                 return None
 
                         if scale_cmb is not None:
-                            val = _parse_scale_text(scale_cmb.currentText())
+                            val = _parse_scale_text(self._safe_current_text(scale_cmb))
                             # if user selected "自動(無指定)" or parsing failed, leave as None
                             try:
                                 for f in self._search_features:
@@ -451,7 +480,7 @@ class plugin(object):
 
                             def _on_scale_changed(i=None):
                                 try:
-                                    txt = scale_cmb.currentText()
+                                    txt = self._safe_current_text(scale_cmb)
                                     v = _parse_scale_text(txt)
                                     # If parsing failed or user selected automatic, leave as None.
                                     # Do NOT fallback to the current canvas scale here — when
@@ -636,28 +665,69 @@ class plugin(object):
         It ensures current_feature.widget points to the dialog's current page widget
         so the search reads the current UI values.
         """
+        # Improved diagnostics: log invocation and internal state to help debug when
+        # the search button appears to do nothing in QGIS.
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage("_invoke_current_feature: invoked", "GEO-search-plugin", 0)
+        except Exception:
+            try:
+                print("_invoke_current_feature: invoked")
+            except Exception:
+                pass
+
         try:
             if not hasattr(self, 'dialog') or not self.dialog:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("_invoke_current_feature: no dialog present", "GEO-search-plugin", 1)
+                except Exception:
+                    print("_invoke_current_feature: no dialog present")
                 return
             # pick current visible widget from dialog
             try:
                 cur = self.dialog.get_current_search_widget()
-            except Exception:
+            except Exception as e:
                 cur = None
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"_invoke_current_feature: get_current_search_widget error: {e}", "GEO-search-plugin", 1)
+                except Exception:
+                    print(f"_invoke_current_feature: get_current_search_widget error: {e}")
+
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_invoke_current_feature: current_feature={bool(self.current_feature)} cur={bool(cur)}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+
             if self.current_feature is not None and cur is not None:
                 try:
                     # Set feature's widget to the current visible widget so its .search_widgets reflect current UI
                     setattr(self.current_feature, 'widget', cur)
-                except Exception:
-                    pass
+                except Exception as e:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"_invoke_current_feature: failed to set widget: {e}", "GEO-search-plugin", 1)
+                    except Exception:
+                        print(f"_invoke_current_feature: failed to set widget: {e}")
+
             # finally invoke feature's show_features
             if self.current_feature is not None:
                 try:
                     self.current_feature.show_features()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"_invoke_current_feature: show_features error: {e}", "GEO-search-plugin", 2)
+                    except Exception:
+                        print(f"_invoke_current_feature: show_features error: {e}")
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_invoke_current_feature: unexpected error: {e}", "GEO-search-plugin", 2)
+            except Exception:
+                print(f"_invoke_current_feature: unexpected error: {e}")
         
     # 以前のイベントフィルタ関連メソッドは不要になったため削除
     # activatedシグナルが同じ項目選択も検出するため、これらのメソッドは不要
