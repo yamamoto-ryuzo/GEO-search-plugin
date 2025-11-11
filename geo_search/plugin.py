@@ -125,6 +125,21 @@ class plugin(object):
             except:
                 pass
 
+    def _safe_current_text(self, widget):
+        """Safely return currentText() from a combo-like widget or empty string.
+
+        This avoids crashing when the widget is None or currentText() returns None.
+        """
+        try:
+            if widget is None:
+                return ""
+            if hasattr(widget, 'currentText'):
+                t = widget.currentText()
+                return t if t is not None else ""
+        except Exception:
+            pass
+        return ""
+
     def update_theme_combobox(self):
         """マップテーマのコンボボックスを更新する"""
         try:
@@ -140,8 +155,8 @@ class plugin(object):
                     pass
                 return
 
-            # 現在選択されているテーマを保存
-            current_theme = self.theme_combobox.currentText()
+            # 現在選択されているテーマを保存（安全に取得）
+            current_theme = self._safe_current_text(self.theme_combobox)
             
             # コンボボックスをクリア
             self.theme_combobox.blockSignals(True)
@@ -193,8 +208,8 @@ class plugin(object):
                     pass
                 return
 
-            # 現在のテーマテキストを取得
-            current_theme_text = self.theme_combobox.currentText()
+            # 現在のテーマテキストを取得（安全に取得）
+            current_theme_text = self._safe_current_text(self.theme_combobox)
             
             # 「テーマ選択」の場合は何もしない
             if current_theme_text == "テーマ選択" or index <= 0:
@@ -449,7 +464,7 @@ class plugin(object):
                                 return None
 
                         if scale_cmb is not None:
-                            val = _parse_scale_text(scale_cmb.currentText())
+                            val = _parse_scale_text(self._safe_current_text(scale_cmb))
                             # if user selected "自動(無指定)" or parsing failed, leave as None
                             try:
                                 for f in self._search_features:
@@ -465,7 +480,7 @@ class plugin(object):
 
                             def _on_scale_changed(i=None):
                                 try:
-                                    txt = scale_cmb.currentText()
+                                    txt = self._safe_current_text(scale_cmb)
                                     v = _parse_scale_text(txt)
                                     # If parsing failed or user selected automatic, leave as None.
                                     # Do NOT fallback to the current canvas scale here — when

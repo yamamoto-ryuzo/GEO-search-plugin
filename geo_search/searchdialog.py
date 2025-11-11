@@ -1599,10 +1599,22 @@ class SearchDialog(QDialog):
             for field_name, editor in editors.items():
                 if field_name == "selectTheme":
                     # QComboBoxまたはQLineEdit対応
-                    if hasattr(editor, "currentText"):
-                        tab_config[field_name] = editor.currentText().strip()
-                    else:
-                        tab_config[field_name] = editor.text().strip()
+                    try:
+                        if editor is None:
+                            tab_config[field_name] = ""
+                        elif hasattr(editor, "currentText"):
+                            val = editor.currentText()
+                            tab_config[field_name] = val.strip() if val else ""
+                        else:
+                            txt = editor.text() if hasattr(editor, 'text') else ''
+                            tab_config[field_name] = txt.strip()
+                    except Exception as e:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"save_tab_config_by_fields: selectTheme read error: {e}", "GEO-search-plugin", 1)
+                        except Exception:
+                            pass
+                        tab_config[field_name] = ""
                 elif field_name == "angle":
                     # editor may be a tuple (spin, checkbox) to support 'unspecified'
                     try:
