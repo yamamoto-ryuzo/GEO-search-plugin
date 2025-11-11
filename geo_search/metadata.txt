@@ -1,5 +1,5 @@
 [general]
-name=GEO-search-plugin-main
+name=geo_search
 qgisMinimumVersion=3.00
 qgisMaximumVersion=3.99
 description=Layer Geo Search
