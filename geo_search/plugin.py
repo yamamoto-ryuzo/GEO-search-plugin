@@ -636,28 +636,69 @@ class plugin(object):
         It ensures current_feature.widget points to the dialog's current page widget
         so the search reads the current UI values.
         """
+        # Improved diagnostics: log invocation and internal state to help debug when
+        # the search button appears to do nothing in QGIS.
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage("_invoke_current_feature: invoked", "GEO-search-plugin", 0)
+        except Exception:
+            try:
+                print("_invoke_current_feature: invoked")
+            except Exception:
+                pass
+
         try:
             if not hasattr(self, 'dialog') or not self.dialog:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("_invoke_current_feature: no dialog present", "GEO-search-plugin", 1)
+                except Exception:
+                    print("_invoke_current_feature: no dialog present")
                 return
             # pick current visible widget from dialog
             try:
                 cur = self.dialog.get_current_search_widget()
-            except Exception:
+            except Exception as e:
                 cur = None
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"_invoke_current_feature: get_current_search_widget error: {e}", "GEO-search-plugin", 1)
+                except Exception:
+                    print(f"_invoke_current_feature: get_current_search_widget error: {e}")
+
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_invoke_current_feature: current_feature={bool(self.current_feature)} cur={bool(cur)}", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+
             if self.current_feature is not None and cur is not None:
                 try:
                     # Set feature's widget to the current visible widget so its .search_widgets reflect current UI
                     setattr(self.current_feature, 'widget', cur)
-                except Exception:
-                    pass
+                except Exception as e:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"_invoke_current_feature: failed to set widget: {e}", "GEO-search-plugin", 1)
+                    except Exception:
+                        print(f"_invoke_current_feature: failed to set widget: {e}")
+
             # finally invoke feature's show_features
             if self.current_feature is not None:
                 try:
                     self.current_feature.show_features()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"_invoke_current_feature: show_features error: {e}", "GEO-search-plugin", 2)
+                    except Exception:
+                        print(f"_invoke_current_feature: show_features error: {e}")
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_invoke_current_feature: unexpected error: {e}", "GEO-search-plugin", 2)
+            except Exception:
+                print(f"_invoke_current_feature: unexpected error: {e}")
         
     # 以前のイベントフィルタ関連メソッドは不要になったため削除
     # activatedシグナルが同じ項目選択も検出するため、これらのメソッドは不要
