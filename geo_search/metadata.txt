@@ -2,9 +2,9 @@
 name=geo_search
 qgisMinimumVersion=3.00
 qgisMaximumVersion=3.99
-description=Layer Geo Search
-about=Retrieval of lot number information and its layer information
-version=2.36.7
+description=地番や住所からベクターレイヤーを検索し、属性・ジオメトリ情報を表示・エクスポートする QGIS プラグイン (Layer Geo Search)
+about=このプラグインは、地番（地籍）や住所などの検索キーを使用して、ワークスペース内のレイヤーから該当するフィーチャを検索・選択します。検索結果はダイアログで表示され、属性の確認、選択フィーチャへのズーム、CSV/PDF へのエクスポートが可能です。主な用途は住所検索、地番検索、属性参照および地図連携です。 / Retrieval of lot number information and its layer information
+version=2.36.9
 author=yamamotoryuzo
 email=ryu@yamakun.net
 tracker=https://github.com/yamamoto-ryuzo/GEO-search-plugin
@@ -12,3 +12,4 @@ repository=https://github.com/yamamoto-ryuzo/GEO-search-plugin
 homepage=https://github.com/yamamoto-ryuzo/GEO-search-plugin
 icon=icon/qgis-icon.png
 category=Plugins
+tags=search;parcel;address;geospatial;geocoding;japan
