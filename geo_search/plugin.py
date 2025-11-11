@@ -132,7 +132,14 @@ class plugin(object):
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
             themes = theme_collection.mapThemes()
-            
+            # safety: theme_combobox may not exist (initGui not yet run or unloaded)
+            if not hasattr(self, 'theme_combobox') or self.theme_combobox is None:
+                try:
+                    QgsMessageLog.logMessage("update_theme_combobox: theme_combobox is not available", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
+                return
+
             # 現在選択されているテーマを保存
             current_theme = self.theme_combobox.currentText()
             
@@ -178,7 +185,14 @@ class plugin(object):
             from qgis.core import QgsProject, QgsMessageLog
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
-            
+            # safety: theme_combobox may not exist
+            if not hasattr(self, 'theme_combobox') or self.theme_combobox is None:
+                try:
+                    QgsMessageLog.logMessage("apply_selected_theme: theme_combobox is not available", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
+                return
+
             # 現在のテーマテキストを取得
             current_theme_text = self.theme_combobox.currentText()
             
