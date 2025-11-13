@@ -64,6 +64,40 @@ class SearchDialog(QDialog):
         except Exception:
             pass
 
+        # Post-initialization: attempt to stabilize layout and table sizing.
+        # Some Qt6 style/backends may delay layout calculations; calling
+        # adjustSize()/updateGeometry() and resizing table columns helps avoid
+        # zero-width header / invisible children that were observed on some
+        # systems. This is defensive and wrapped in try/except to be safe.
+        try:
+            # ensure top-level layout is recalculated
+            try:
+                self.adjustSize()
+            except Exception:
+                pass
+
+            from qgis.PyQt.QtWidgets import QWidget, QTableWidget
+            # update geometry for all child widgets
+            for w in self.findChildren(QWidget):
+                try:
+                    # keep widgets hidden state as-is; just nudge geometry
+                    w.updateGeometry()
+                    w.repaint()
+                except Exception:
+                    pass
+
+            # resize any tables to contents so headers don't collapse to zero
+            for t in self.findChildren(QTableWidget):
+                try:
+                    t.resizeColumnsToContents()
+                    t.resizeRowsToContents()
+                    t.repaint()
+                except Exception:
+                    pass
+        except Exception:
+            # swallow any errors - this is purely best-effort
+            pass
+
     def init_gui(self, setting):
         self.tab_groups = self.create_tab_groups(setting["SearchTabs"])
         # create Page
@@ -1236,7 +1270,22 @@ class SearchDialog(QDialog):
             layout.addLayout(button_layout)
             
             # ダイアログを表示
-            edit_dialog.exec_()
+            try:
+                import importlib
+                qt_compat = importlib.import_module('geo_search.qt_compat')
+            except Exception:
+                qt_compat = None
+            if qt_compat is not None:
+                qt_compat.exec_dialog(edit_dialog)
+            else:
+                # fallback: try old call
+                try:
+                    edit_dialog.exec_()
+                except Exception:
+                    try:
+                        edit_dialog.exec()
+                    except Exception:
+                        pass
             
         except Exception as e:
             try:
@@ -1348,7 +1397,21 @@ class SearchDialog(QDialog):
             layout.addLayout(button_layout)
             
             # ダイアログを表示
-            fields_dialog.exec_()
+            try:
+                import importlib
+                qt_compat = importlib.import_module('geo_search.qt_compat')
+            except Exception:
+                qt_compat = None
+            if qt_compat is not None:
+                qt_compat.exec_dialog(fields_dialog)
+            else:
+                try:
+                    fields_dialog.exec_()
+                except Exception:
+                    try:
+                        fields_dialog.exec()
+                    except Exception:
+                        pass
             
         except Exception as e:
             try:
@@ -1471,7 +1534,21 @@ class SearchDialog(QDialog):
             layout.addLayout(button_layout)
             
             # ダイアログを表示
-            fields_dialog.exec_()
+            try:
+                import importlib
+                qt_compat = importlib.import_module('geo_search.qt_compat')
+            except Exception:
+                qt_compat = None
+            if qt_compat is not None:
+                qt_compat.exec_dialog(fields_dialog)
+            else:
+                try:
+                    fields_dialog.exec_()
+                except Exception:
+                    try:
+                        fields_dialog.exec()
+                    except Exception:
+                        pass
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog

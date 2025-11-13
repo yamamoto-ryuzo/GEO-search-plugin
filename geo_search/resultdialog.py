@@ -104,8 +104,26 @@ class ResultDialog(QDialog):
         if fields:
             self.tableWidget.setHorizontalHeaderLabels([field.displayName() for field in fields])
             header = self.tableWidget.horizontalHeader()
+            # Prefer sizing to contents and then stretch the last column so
+            # attributes do not collapse to very small widths under Qt6.
+            try:
+                header.setMinimumSectionSize(60)
+            except Exception:
+                pass
             for i in range(len(fields)):
-                header.setSectionResizeMode(i, header.Stretch)
+                try:
+                    header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+                except Exception:
+                    # fallback to Stretch if ResizeToContents not available
+                    try:
+                        header.setSectionResizeMode(i, QHeaderView.Stretch)
+                    except Exception:
+                        pass
+            try:
+                # make last column expand to fill available space
+                header.setStretchLastSection(True)
+            except Exception:
+                pass
 
         self.setWindowTitle(f"検索結果: {len(features)}件")
         max_page = math.ceil(len(features) / self.page_limit) if features else 1
@@ -135,12 +153,23 @@ class ResultDialog(QDialog):
             self.tabWidget.removeTab(0)
         total_count = 0
         for layer, fields, features in layers_with_features:
+            # defensive: ensure features is a concrete list (caller may pass an iterator)
+            try:
+                features = list(features)
+            except Exception:
+                pass
             total_count += len(features)
             try:
                 from qgis.core import QgsMessageLog
                 QgsMessageLog.logMessage(f"set_features_by_layer: preparing tab for layer={getattr(layer, '__repr__', lambda: layer)()} features_count={len(features)}", "GEO-search-plugin", 0)
             except Exception:
                 pass
+            # ensure fields is a concrete sequence of field objects
+            try:
+                fields = list(fields) if fields is not None else []
+            except Exception:
+                pass
+
             # create a new table for this tab
             table = QTableWidget(self)
             table.setEditTriggers(self.tableWidget.editTriggers())
@@ -153,8 +182,22 @@ class ResultDialog(QDialog):
             if fields:
                 table.setHorizontalHeaderLabels([field.displayName() for field in fields])
                 header = table.horizontalHeader()
+                try:
+                    header.setMinimumSectionSize(60)
+                except Exception:
+                    pass
                 for i in range(len(fields)):
-                    header.setSectionResizeMode(i, header.Stretch)
+                    try:
+                        header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+                    except Exception:
+                        try:
+                            header.setSectionResizeMode(i, QHeaderView.Stretch)
+                        except Exception:
+                            pass
+                try:
+                    header.setStretchLastSection(True)
+                except Exception:
+                    pass
             # connect signals
             table.itemSelectionChanged.connect(lambda: self.selectionChanged.emit())
             table.itemPressed.connect(lambda item: self.itemPressed.emit(item))
@@ -258,18 +301,99 @@ class ResultDialog(QDialog):
         if table is None:
             table = self.current_table
         if fields is None:
-            # find fields from current tab
-            idx = self.tabWidget.currentIndex()
-            fields = self._tabs[idx].get("fields") if self._tabs else self.fields
+            # Prefer to resolve fields by matching the provided table to a tab entry
+            fields = None
+            try:
+                for tab in self._tabs:
+                    if tab.get('table') is table:
+                        fields = tab.get('fields')
+                        break
+            except Exception:
+                fields = None
+            # fallback: use current tab if still unresolved
+            if fields is None:
+                try:
+                    idx = self.tabWidget.currentIndex()
+                    fields = self._tabs[idx].get("fields") if self._tabs else self.fields
+                except Exception:
+                    fields = self.fields
         table.clearContents()
         try:
             from qgis.core import QgsMessageLog
             QgsMessageLog.logMessage(f"set_feature_items: table={table} fields_count={len(fields) if fields else 0} features_count={len(features)}", "GEO-search-plugin", 0)
-            # show sample feature ids/attrs
+        except Exception:
+            pass
+
+        # Defensive fallback: if no fields were provided, attempt to derive them from
+        # the features (prefer QgsFields from the first feature) or the table's layer.
+        if not fields:
+            try:
+                if features:
+                    f0 = features[0]
+                    try:
+                        derived = list(f0.fields())
+                        if derived:
+                            fields = derived
+                    except Exception:
+                        # fallback: try to read attribute keys via .attributes() and create
+                        # a minimal list of objects with name() via simple wrappers
+                        try:
+                            attr_names = []
+                            try:
+                                # try feature.fields().names() if available
+                                attr_names = [f.name() for f in f0.fields()]
+                            except Exception:
+                                # last resort: use indices
+                                attr_names = []
+                            if attr_names:
+                                # create simple anonymous objects with name() method via lambda class
+                                class _FakeField:
+                                    def __init__(self, n):
+                                        self._n = n
+                                    def name(self):
+                                        return self._n
+                                    def displayName(self):
+                                        return self._n
+                                fields = [_FakeField(n) for n in attr_names]
+                        except Exception:
+                            fields = []
+                else:
+                    fields = []
+            except Exception:
+                fields = []
+
+        # If we derived fields, ensure the table has appropriate columns and headers
+        try:
+            if fields:
+                # ensure column count matches
+                try:
+                    table.setColumnCount(len(fields))
+                except Exception:
+                    pass
+                try:
+                    # header labels: prefer displayName() if present, else name()
+                    labels = []
+                    for f in fields:
+                        try:
+                            labels.append(f.displayName())
+                        except Exception:
+                            try:
+                                labels.append(f.name())
+                            except Exception:
+                                labels.append(str(f))
+                    table.setHorizontalHeaderLabels(labels)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # show sample feature ids/attrs for debugging
+        try:
+            from qgis.core import QgsMessageLog
             sample_info = []
             for i, feat in enumerate(features[:3]):
                 try:
-                    sample_info.append({ 'id': feat.id(), 'attrs': { f.name(): feat[f.name()] for f in fields } })
+                    sample_info.append({ 'id': feat.id(), 'attrs': { (f.name() if hasattr(f, 'name') else str(f)): feat[f.name()] if hasattr(f, 'name') else None for f in fields } })
                 except Exception:
                     sample_info.append(str(feat))
             QgsMessageLog.logMessage(f"set_feature_items: samples={sample_info}", "GEO-search-plugin", 0)
@@ -282,6 +406,30 @@ class ResultDialog(QDialog):
         try:
             # ensure UI updates and columns are sized
             table.resizeColumnsToContents()
+            # After sizing to contents, ensure columns are not too narrow under Qt6.
+            try:
+                header = table.horizontalHeader()
+                # enforce a sensible minimum column width
+                try:
+                    header.setMinimumSectionSize(60)
+                except Exception:
+                    pass
+                # if total column widths are noticeably smaller than the table viewport,
+                # let the last section stretch to avoid a single narrow column
+                try:
+                    total = 0
+                    for c in range(table.columnCount()):
+                        total += table.columnWidth(c)
+                    viewport_w = table.viewport().width() if table.viewport() is not None else table.width()
+                    if viewport_w > total * 1.1:
+                        try:
+                            header.setStretchLastSection(True)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            except Exception:
+                pass
             # repaint and ensure the first cell is focused/visible
             table.repaint()
             if table.rowCount() > 0 and table.columnCount() > 0:

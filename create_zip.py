@@ -1,12 +1,27 @@
+import argparse
+import fnmatch
 import os
 import zipfile
 import shutil
+from typing import Iterable
 
 
-def find_metadata():
-    """Search for metadata.txt in the current directory or one-level subdirectories.
-    Returns (metadata_path, source_dir). source_dir is the directory that contains metadata.txt.
+DEFAULT_EXCLUDES = [
+    '__pycache__', '*.pyc', '*.pyo', '*.pyd', '.git', '.gitignore', '.pytest_cache', '.mypy_cache',
+    '*.egg-info', 'dist', 'build', '.venv', 'venv', '.vscode', '.idea', 'tests', 'node_modules',
+    '*.log', '*.sqlite', '*.db', '.DS_Store'
+]
+
+
+def find_metadata(src_hint: str = None):
+    """Search for metadata.txt. If src_hint is provided and contains metadata.txt use it.
+    Returns absolute path to metadata and the folder containing it.
     """
+    if src_hint:
+        candidate = os.path.join(src_hint, 'metadata.txt')
+        if os.path.isfile(candidate):
+            return os.path.abspath(candidate), os.path.abspath(src_hint)
+
     root_meta = os.path.join('.', 'metadata.txt')
     if os.path.isfile(root_meta):
         return os.path.abspath(root_meta), os.path.abspath('.')
@@ -17,24 +32,24 @@ def find_metadata():
     return None, None
 
 
-def read_metadata_version(metadata_path):
+def read_metadata_value(metadata_path: str, key: str):
     with open(metadata_path, encoding='utf-8') as f:
         for line in f:
-            if line.startswith('version='):
-                return line.strip().split('=')[1]
+            if line.startswith(f'{key}='):
+                return line.strip().split('=', 1)[1]
     return None
 
 
-def bump_version(version):
+def bump_version(version: str) -> str:
     parts = version.split('.')
-    if len(parts) == 3:
+    if len(parts) == 3 and parts[2].isdigit():
         parts[2] = str(int(parts[2]) + 1)
     else:
         parts.append('1')
     return '.'.join(parts)
 
 
-def update_metadata_version(metadata_path, new_version):
+def update_metadata_version(metadata_path: str, new_version: str):
     with open(metadata_path, encoding='utf-8') as f:
         lines = f.readlines()
     with open(metadata_path, 'w', encoding='utf-8') as f:
@@ -45,96 +60,119 @@ def update_metadata_version(metadata_path, new_version):
                 f.write(line)
 
 
-def get_plugin_name(metadata_path):
-    with open(metadata_path, encoding='utf-8') as f:
-        for line in f:
-            if line.startswith('name='):
-                return line.strip().split('=')[1]
-    return 'plugin'
+def remove_old_zip(plugin_base: str, out_dir: str = '.'):
+    for fname in os.listdir(out_dir):
+        if fname.startswith(plugin_base) and fname.endswith('.zip'):
+            os.remove(os.path.join(out_dir, fname))
 
 
-def _ignore_pyc_and_pycache(dir, names):
-    """Ignore compiled python files and __pycache__ directories when copying.
+def should_exclude(relpath: str, patterns: Iterable[str]) -> bool:
+    """Return True if relpath matches any glob pattern in patterns."""
+    for pat in patterns:
+        # match both filename and path-like globs
+        if fnmatch.fnmatch(relpath, pat) or fnmatch.fnmatch(os.path.basename(relpath), pat):
+            return True
+    return False
 
-    shutil.copytree expects an ignore callable that accepts (dir, names)
-    and returns a sequence of names to ignore.
-    """
-    return {n for n in names if n == '__pycache__' or n.endswith('.pyc')}
+
+def create_zip_from_folder(src_dir: str, zip_path: str, plugin_base: str, excludes: Iterable[str]):
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(src_dir):
+            # compute relative path from src_dir
+            rel_root = os.path.relpath(root, src_dir)
+            if rel_root == '.':
+                rel_root = ''
+
+            # filter dirs in-place to avoid walking excluded directories
+            dirs[:] = [d for d in dirs if not should_exclude(os.path.join(rel_root, d), excludes) and d != '__pycache__']
+
+            for file in files:
+                relpath = os.path.join(rel_root, file) if rel_root else file
+                if should_exclude(relpath, excludes) or file.endswith('.pyc'):
+                    continue
+                abs_path = os.path.join(root, file)
+                arcname = os.path.join(plugin_base, relpath).replace('\\', '/')
+                zipf.write(abs_path, arcname)
 
 
-def remove_old_zip(plugin_name):
-    for fname in os.listdir('.'):
-        if fname.startswith(plugin_name) and fname.endswith('.zip'):
-            os.remove(fname)
+def parse_args():
+    p = argparse.ArgumentParser(description='Create ZIP for QGIS plugin (geo_search)')
+    p.add_argument('--src', default='geo_search', help='Source folder to package (default: geo_search)')
+    p.add_argument('--out', default=None, help='Output zip path (default: <plugin>_<version>.zip in current dir)')
+    p.add_argument('-e', '--exclude', action='append', default=[], help='Glob pattern to exclude (repeatable)')
+    p.add_argument('--no-bump', action='store_true', help="Don't bump metadata version")
+    p.add_argument('--dry-run', action='store_true', help='Show what would be included without creating zip')
+    return p.parse_args()
 
 
 def main():
-    metadata_path, src_dir = find_metadata()
+    args = parse_args()
+
+    metadata_path, detected_src = find_metadata(args.src if args.src else None)
+
+    # prefer explicit src if it exists, otherwise use detected location
+    if os.path.isdir(args.src):
+        src_dir = os.path.abspath(args.src)
+    elif detected_src:
+        src_dir = detected_src
+    else:
+        print(f"Source folder '{args.src}' not found and metadata not detected.")
+        return
+
     if not metadata_path:
-        print('metadata.txt not found in current directory or one-level subdirectories')
-        return
+        print('metadata.txt not found; packaging will still proceed but version/name are unknown')
 
-    version = read_metadata_version(metadata_path)
-    if not version:
-        print(f'version not found in {metadata_path}')
-        return
+    version = None
+    plugin_name = os.path.basename(src_dir)
+    if metadata_path:
+        version = read_metadata_value(metadata_path, 'version')
+        name = read_metadata_value(metadata_path, 'name')
+        if name:
+            plugin_name = name
 
-    new_version = bump_version(version)
-    update_metadata_version(metadata_path, new_version)
+    if version and not args.no_bump:
+        new_version = bump_version(version)
+        update_metadata_version(metadata_path, new_version)
+        version = new_version
 
-    plugin_name = get_plugin_name(metadata_path)
-    # sanitize plugin name for filesystem usage in zip
     plugin_base = plugin_name.replace(' ', '-')
-    zip_name = f'{plugin_base}_{new_version}.zip'
+
+    # build zip name
+    if args.out:
+        zip_name = args.out
+    else:
+        ver = version if version else 'dev'
+        zip_name = f'{plugin_base}_{ver}.zip'
+
+    # assemble exclude list
+    excludes = list(DEFAULT_EXCLUDES)
+    # user provided excludes override or extend
+    if args.exclude:
+        excludes.extend(args.exclude)
+
+    # dry run: just list files that would be added
+    if args.dry_run:
+        print('Dry run: files that would be included:')
+        for root, dirs, files in os.walk(src_dir):
+            rel_root = os.path.relpath(root, src_dir)
+            if rel_root == '.':
+                rel_root = ''
+            dirs[:] = [d for d in dirs if not should_exclude(os.path.join(rel_root, d), excludes) and d != '__pycache__']
+            for file in files:
+                relpath = os.path.join(rel_root, file) if rel_root else file
+                if should_exclude(relpath, excludes) or file.endswith('.pyc'):
+                    continue
+                print(relpath)
+        return
 
     remove_old_zip(plugin_base)
 
-    temp_dir = f'{plugin_base}_pkg'
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-    os.mkdir(temp_dir)
+    # create output dir if nested path provided
+    out_dir = os.path.dirname(os.path.abspath(zip_name)) or '.'
+    os.makedirs(out_dir, exist_ok=True)
 
-    # 必要最小限のファイル・フォルダ（src_dir 内またはルートのいずれかから探す）
-    includes = [
-        '__init__.py', 'metadata.txt', 'plugin.py', 'constants.py', 'searchfeature.py', 'searchdialog.py',
-        'resultdialog.py', 'autodialog.py', 'utils.py', 'resources.py', 'resources.qrc',
-        'setting.json', 'README.md', 'view.sql', 'icon', 'ui', 'widget', 'i18n', 'jaconv', 'LICENSE'
-    ]
+    create_zip_from_folder(src_dir, zip_name, plugin_base, excludes)
 
-    for item in includes:
-        # prefer path under src_dir, but fall back to root
-        src_path = os.path.join(src_dir, item) if src_dir and src_dir != os.path.abspath('.') else os.path.join('.', item)
-        if not os.path.exists(src_path):
-            # try fallback to root if we were looking in subdir
-            alt = os.path.join('.', item)
-            if os.path.exists(alt):
-                src_path = alt
-
-        if os.path.isdir(src_path):
-            dest_path = os.path.join(temp_dir, item)
-            # copytree will fail if dest exists; dest won't exist here
-            shutil.copytree(src_path, dest_path, ignore=_ignore_pyc_and_pycache)
-        elif os.path.isfile(src_path):
-            dest = os.path.join(temp_dir, item)
-            # ensure destination directory exists
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            shutil.copy2(src_path, dest)
-        else:
-            print(f'Warning: {src_path} not found, skipping')
-
-    with zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(temp_dir):
-            # don't recurse into __pycache__ if any slipped through
-            dirs[:] = [d for d in dirs if d != '__pycache__']
-            for file in files:
-                # skip compiled python files
-                if file.endswith('.pyc'):
-                    continue
-                path = os.path.join(root, file)
-                arcname = os.path.relpath(path, temp_dir)
-                zipf.write(path, os.path.join(plugin_base, arcname))
-
-    shutil.rmtree(temp_dir)
     print(f'Created {zip_name}')
 
 

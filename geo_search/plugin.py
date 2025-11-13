@@ -32,7 +32,22 @@ from .searchdialog import SearchDialog
 
 class plugin(object):
     def __init__(self, iface):
+        # Ensure compatibility shim is loaded when plugin instance is created.
+        # This is defensive: classFactory also attempts to import the shim, but
+        # importing it here guarantees the monkey-patch for QgsMessageLog is
+        # applied before any logMessage calls executed by this instance.
+        try:
+            import importlib
+            importlib.import_module('geo_search.qt_compat')
+        except Exception:
+            # ignore failures; plugin should still attempt to run
+            pass
         self.iface = iface
+        # GUI-ready flag: set to True at the end of initGui(). Some QGIS
+        # signals (projectRead, etc.) may fire before initGui runs; checking
+        # this flag avoids noisy warnings when widgets like theme_combobox
+        # are not yet created.
+        self._gui_ready = False
         self._init_language()
         self.current_feature = None
         self._current_group_widget = None
@@ -360,6 +375,22 @@ class plugin(object):
             # QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
 
             self.dialog = SearchDialog(settings, parent=self.iface.mainWindow(), iface=self.iface)
+            # Defensive: nudge dialog layout and resize any tables so headers don't
+            # collapse to zero width on some platforms (Qt6 style differences).
+            try:
+                try:
+                    self.dialog.adjustSize()
+                except Exception:
+                    pass
+                from qgis.PyQt.QtWidgets import QTableWidget
+                for t in self.dialog.findChildren(QTableWidget):
+                    try:
+                        t.resizeColumnsToContents()
+                        t.resizeRowsToContents()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             widgets = self.dialog.get_widgets()
             self._search_features = []
             # ここでおこられてる

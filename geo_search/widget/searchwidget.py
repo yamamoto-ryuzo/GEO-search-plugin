@@ -16,6 +16,7 @@ from qgis.PyQt.QtWidgets import (
     QLayout,
     QLayoutItem,
 )
+import importlib
 
 
 class SearchWidget(QWidget):
@@ -234,7 +235,38 @@ class SearchTibanWidget(SearchTextWidget):
         self.code_table = QTableWidget()
         self.code_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.code_table.setSelectionMode(QTableWidget.SingleSelection)
-        self.code_table.setSelectionBehavior(QTableWidget.SelectRows)
+        # Qt5: QTableWidget.SelectRows (alias of QAbstractItemView.SelectRows)
+        # Qt6: enum moved to QAbstractItemView.SelectionBehavior.SelectRows
+        try:
+            qt_compat = importlib.import_module('geo_search.qt_compat')
+        except Exception:
+            qt_compat = None
+
+        sel = None
+        if qt_compat is not None:
+            try:
+                sel = qt_compat.get_enum_value(qt_compat.QtWidgets.QAbstractItemView, 'SelectRows')
+            except Exception:
+                sel = None
+            if sel is None:
+                try:
+                    sel = qt_compat.get_enum_value(qt_compat.QtWidgets.QTableWidget, 'SelectRows')
+                except Exception:
+                    sel = None
+
+        if sel is not None:
+            try:
+                self.code_table.setSelectionBehavior(sel)
+            except Exception:
+                try:
+                    self.code_table.setSelectionBehavior(1)
+                except Exception:
+                    pass
+        else:
+            try:
+                self.code_table.setSelectionBehavior(1)
+            except Exception:
+                pass
         v_header = self.code_table.verticalHeader()
         v_header.setVisible(False)
         search_layout.addLayout(input_layout)
