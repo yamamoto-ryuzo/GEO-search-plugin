@@ -4,6 +4,87 @@
 
 最終的には https://github.com/NationalSecurityAgency/qgis-searchlayers-plugin と統合したい  
 
+## Qt6/QGIS (3.44+) 対応について
+
+このリポジトリは Qt5 と Qt6 の両方で動作するよう互換性対応を行っています（QGIS 3.44 以降の Qt6 ビルド上でも動作することを目標としています）。主な対応点:
+
+- `metadata.txt` に `supportsQt6 = True` を追加済み
+- PyQt の import を `from qgis.PyQt import ...` に正規化
+- `geo_search/qt_compat.py` に Qt5/6 の差分（enum/flags、exec_/exec のラッパー、QDockWidget フラグ等）と小さな monkey-patch を追加
+- Qt6 固有の描画タイミング差に対する UI の安定化（ヘッダーのリサイズ方法や最終列のストレッチ、最小幅の設定）を導入
+
+注意: QGIS 本体のビルドや環境（QGIS のバージョン、OS、ディスプレイ環境）により振る舞いが変わる場合があります。下の「既知の問題と対処」をご確認ください。
+
+## インストール／デプロイ（開発中の手順）
+
+1. プラグインのバックアップを作成します（QGIS プラグインフォルダ内の `geo_search` を別名でコピー）。
+2. このリポジトリのフォルダを QGIS のプラグインフォルダに上書きするか、配布用 ZIP を作成してインストールします。ZIP を作る場合はリポジトリルートで次を実行します:
+
+```powershell
+python .\create_zip.py            # ドライランや実際の zip 作成フラグがあります
+```
+
+3. QGIS を再起動し、プラグインを有効にします。
+
+## トラブルシュート: 画面が空白／属性列が非常に狭い場合
+
+Qt6 環境で検索結果ダイアログの属性列が極端に狭くなったり、テーブルが一見空に見えることが報告されています。対処法:
+
+- プラグイン無効化→上書き→有効化、または QGIS を再起動してから再実行する
+- 結果ダイアログで列を右クリック→「列を自動調整」やウィンドウをリサイズして表示を試す
+- それでもダメな場合、Python コンソールで以下の診断スニペットを実行して内部状態を出力し、出力をここに貼ってください（fields_count / features_count、column widths を確認します）:
+
+```python
+# qgis Python コンソールで実行
+plg = qgis.utils.plugins.get('geo_search')
+dlg = getattr(plg, 'dialog', None)
+if not dlg:
+  print("dialog not found on plugin instance")
+else:
+  print("tab count:", dlg.tabWidget.count())
+  for i, tab in enumerate(dlg._tabs):
+    layer = tab.get('layer')
+    fields = tab.get('fields') or []
+    features = tab.get('features') or []
+    tbl = tab.get('table')
+    print(f"TAB {i}: name={(dlg.tabWidget.tabText(i) if i < dlg.tabWidget.count() else 'n/a')}")
+    print("  layer:", getattr(layer, 'name', lambda: layer)())
+    print("  fields_count:", len(fields))
+    print("  features_count:", len(features))
+    if fields:
+      labels = []
+      for f in fields[:5]:
+        try:
+          labels.append(f.displayName())
+        except Exception:
+          try:
+            labels.append(f.name())
+          except Exception:
+            labels.append(str(f))
+      print("  sample field labels:", labels)
+    if tbl:
+      print("  table columnCount:", tbl.columnCount(), "rowCount:", tbl.rowCount())
+      try:
+        widths = [tbl.columnWidth(c) for c in range(tbl.columnCount())]
+        print("  column widths:", widths)
+      except Exception as e:
+        print("  could not read column widths:", e)
+```
+
+問題が再現する場合は、上記出力を貼っていただければ次の解析を行います。
+
+## パッケージ作成
+
+配布用 ZIP は `create_zip.py` を使って生成できます。スクリプトは不要なファイルを除外し、`metadata.txt` のバージョンを自動で反映するオプションを備えています。
+
+## 既知の問題と注意点
+
+- 一部の環境では QGIS の UI イベントループと Qt6 の描画順序によりウィジェットが初期レンダリングされない（visible=False や 0 サイズになる）ことがあります。現状はダイアログ内でイベント処理／強制リサイズを入れることで安定化を図っていますが、完全に再現性のある修正は環境依存で追加調査が必要です。
+- ログに `fields_count=0` や `features_count=0` と出る場合、UI 側ではなく検索処理側（SearchFeature）で fields/features が空になっている可能性があります。その場合は追加の呼び出し側ログを入れて解析します。
+
+---
+（以下、既存の README 内容が続きます）
+
 ### UI設定画面(プロジェクトファイルに設定されます)  
 <img width="686" height="740" alt="image" src="https://github.com/user-attachments/assets/27cad15f-890f-4bfc-9c61-3660531e7c32" />
 
