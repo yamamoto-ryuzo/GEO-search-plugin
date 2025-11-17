@@ -1,6 +1,59 @@
 
 # 地図検索
+
+## About (English)
+
+This plugin provides tools to retrieve cadastral lot ("tiban" / 地番) information and related layer attributes from QGIS layers, files, or database tables (e.g. PostGIS). It supports searching by lot number, owner name, and general attribute queries; presents results in per-layer tabs with configurable display fields and pagination; and can apply or restore map themes when performing searches. The plugin is intended for QGIS 3.x and includes compatibility support for both Qt5 and Qt6 (`supportsQt6=True`).
+
+## 概要（日本語）
+
+このプラグインは、QGIS 上のレイヤやファイル、データベース（例：PostGIS）から地番情報（地籍の筆番号等）やそれに付随する属性情報を取得・表示するためのツール群を提供します。地番検索、所有者検索、汎用属性検索をサポートし、レイヤごとのタブ表示・表示フィールドの選択・ページング機能・検索時のマップテーマ適用などの機能を備えています。Qt5・Qt6 両対応を目指しており、QGIS 3.x 上での利用を想定しています。
+
+### Quick Start (English)
+
+- Install: copy the `geo_search` folder into your QGIS user plugins directory or install the ZIP via `Plugins → Manage and Install Plugins → Install from ZIP`.
+- Start: enable the plugin in QGIS and click the toolbar button to open the Search dialog.
+- Search: select or configure a search tab, enter a query (lot number / owner name / attribute) and click `Search`.
+- View results: results appear in per-layer tabs; click a row to zoom/select on the map. Use the table header to auto-resize columns if needed.
+- Troubleshooting: if columns appear collapsed or empty, try reloading the plugin or restarting QGIS; run the diagnostic snippet in the README to collect console logs.
+
 　<img width="213" height="35" alt="image" src="https://github.com/user-attachments/assets/8010fdf0-5e57-4215-8b3a-6dcd3e61fc9f" />
+
+### UI settings / UI設定画面 (project-saved)
+
+- English: Configure per-tab search settings (layers, search fields, display fields, and optional map themes). These settings are saved to the QGIS project file so project-specific search configurations can be reused.
+- 日本語: 各検索タブごとの設定（対象レイヤ、検索フィールド、表示フィールド、マップテーマなど）をGUIで編集でき、設定はプロジェクトファイルに保存されます。
+
+<img width="686" height="740" alt="image" src="https://github.com/user-attachments/assets/27cad15f-890f-4bfc-9c61-3660531e7c32" />
+
+### Lot-number search / 地番検索
+
+- English: Search cadastral lot ("tiban") by lot number. Supports exact, regex and fuzzy/neighbor searches, and shows results per layer in tabbed tables with pagination.
+- 日本語: 地番（筆番号）で検索します。正規表現／完全一致／あいまい検索をサポートし、結果はレイヤごとにタブ化されたテーブルでページング表示されます。
+
+![image](https://user-images.githubusercontent.com/86514652/183770100-a385fad3-bc25-47f8-919c-659554c1f7e3.png)
+
+### General attribute search / 汎用的な検索
+
+- English: Perform attribute-based searches on arbitrary fields. Displayed columns and paging behavior can be configured per-tab.
+- 日本語: 任意の属性フィールドに対する検索です。表示するカラムやページングはタブごとの設定で制御できます。
+
+![image](https://github.com/yamamoto-ryuzo/GEO-search-plugin/assets/86514652/4483e588-2c1d-4133-9cfe-fc33bb9a5068)
+
+### Owner-name search / 所有者検索
+
+- English: Search by owner name with normalization (kana conversion, whitespace handling). Multiple fields can be selected; supports prefix and substring matching depending on configuration.
+- 日本語: 所有者名で検索します。全角カナ→半角化や空白処理など正規化を行い、複数フィールドの組合せ検索や前方一致／部分一致が設定により可能です。
+
+![image](https://user-images.githubusercontent.com/86514652/183770143-61080ecd-7f55-4647-965a-206bc79191d1.png)
+
+### クイックスタート（日本語）
+
+- インストール: `geo_search` フォルダを QGIS のユーザープラグインディレクトリにコピーするか、ZIP を `プラグインの管理とインストール` から導入してください。
+- 起動: QGIS でプラグインを有効化し、ツールバーの起動ボタンから検索ダイアログを開きます。
+- 検索: タブを選択または設定し、地番・所有者名・属性などを入力して `検索` を押します。
+- 結果: レイヤごとのタブに結果が表示され、行をクリックすると地図上で選択・移動します。列幅が狭い場合はテーブルヘッダーから自動調整してください。
+- トラブルシュート: 表示がおかしい場合はプラグインを無効化→上書き→有効化、または QGIS を再起動してから再実行してください。
 
 最終的には https://github.com/NationalSecurityAgency/qgis-searchlayers-plugin と統合したい  
 
@@ -83,19 +136,7 @@ else:
 - ログに `fields_count=0` や `features_count=0` と出る場合、UI 側ではなく検索処理側（SearchFeature）で fields/features が空になっている可能性があります。その場合は追加の呼び出し側ログを入れて解析します。
 
 ---
-（以下、既存の README 内容が続きます）
 
-### UI設定画面(プロジェクトファイルに設定されます)  
-<img width="686" height="740" alt="image" src="https://github.com/user-attachments/assets/27cad15f-890f-4bfc-9c61-3660531e7c32" />
-
-### 地番検索  
-![image](https://user-images.githubusercontent.com/86514652/183770100-a385fad3-bc25-47f8-919c-659554c1f7e3.png)  
-
-### 地番の所有者検索  
-![image](https://user-images.githubusercontent.com/86514652/183770143-61080ecd-7f55-4647-965a-206bc79191d1.png)  
-
-### 汎用的な検索  
-![image](https://github.com/yamamoto-ryuzo/GEO-search-plugin/assets/86514652/4483e588-2c1d-4133-9cfe-fc33bb9a5068)  
 
 ## 設定項目
 
