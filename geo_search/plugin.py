@@ -108,6 +108,37 @@ class plugin(object):
         self.theme_combobox.setMinimumWidth(180)
         self.iface.addToolBarWidget(self.theme_combobox)
 
+        # テーマ適用モード切替: 通常適用 / 追加表示（現在の表示を保持して追加で表示）
+        # テーマ適用モード切替: 通常適用 / 追加表示（現在の表示を保持して追加で表示）
+        try:
+            from qgis.PyQt.QtWidgets import QAction as QActionClass
+        except Exception:
+            QActionClass = None
+        self._theme_additive_mode = False
+        if QActionClass is not None:
+            try:
+                self.additive_theme_action = QActionClass("追加表示", self.iface.mainWindow())
+                self.additive_theme_action.setCheckable(True)
+                self.additive_theme_action.setChecked(False)
+                self.additive_theme_action.setToolTip("選択したテーマの表示レイヤを現在の表示に追加します（オン：追加表示、オフ：通常上書き）")
+                # toggle 挙動を内部フラグに反映
+                try:
+                    self.additive_theme_action.toggled.connect(lambda checked: setattr(self, '_theme_additive_mode', bool(checked)))
+                except Exception:
+                    pass
+                try:
+                    self.iface.addToolBarIcon(self.additive_theme_action)
+                except Exception:
+                    try:
+                        self.iface.addToolBarWidget(self.additive_theme_action)
+                    except Exception:
+                        pass
+            except Exception:
+                try:
+                    self._theme_additive_mode = False
+                except Exception:
+                    pass
+
         # 内部キャッシュ: グループ -> [テーマ名,...]
         self._theme_groups = {}
 
@@ -370,6 +401,7 @@ class plugin(object):
             # (前回と同じ選択でも強制的にテーマを適用)
             root = project.layerTreeRoot()
             model = self.iface.layerTreeView().layerTreeModel()
+
             # apply 中に mapThemesChanged 等のシグナルが発生して
             # update_theme_combobox が走ると UI 候補が書き換わる可能性があるため
             # 一時的に更新を抑止するフラグを立てる
@@ -377,19 +409,100 @@ class plugin(object):
                 self._suppress_theme_update = True
             except Exception:
                 pass
+
+            # 追加表示モードの場合は、選択テーマで可視になるレイヤを現在の表示に上乗せする
             try:
-                theme_collection.applyTheme(theme_name, root, model)
-            finally:
-                # イベントループの次回サイクルでフラグを解除する
-                try:
-                    from qgis.PyQt.QtCore import QTimer
-                    QTimer.singleShot(0, lambda: setattr(self, '_suppress_theme_update', False))
-                except Exception:
+                if getattr(self, '_theme_additive_mode', False):
                     try:
-                        self._suppress_theme_update = False
+                        # 現在可視なレイヤIDの集合を取得
+                        orig_visible = set()
+                        try:
+                            nodes_before = root.findLayers()
+                        except Exception:
+                            nodes_before = []
+                        for n in nodes_before:
+                            try:
+                                if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
+                                    lid = n.layer().id()
+                                    orig_visible.add(lid)
+                            except Exception:
+                                continue
+
+                        # テーマを適用（QGIS側で一時的に切り替える）
+                        theme_collection.applyTheme(theme_name, root, model)
+
+                        # テーマ適用後にテーマ側で可視なレイヤIDを取得
+                        theme_visible = set()
+                        try:
+                            nodes_after = root.findLayers()
+                        except Exception:
+                            nodes_after = []
+                        for n in nodes_after:
+                            try:
+                                if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
+                                    lid = n.layer().id()
+                                    theme_visible.add(lid)
+                            except Exception:
+                                continue
+
+                        # union を作成
+                        union_ids = orig_visible.union(theme_visible)
+
+                        # まず全レイヤを非表示にしてから union にあるものだけ表示する
+                        try:
+                            for n in nodes_after:
+                                try:
+                                    n.setItemVisibilityChecked(False)
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
+
+                        # 表示復元（親グループも表示する）
+                        for n in nodes_after:
+                            try:
+                                layer = n.layer()
+                                if layer is None:
+                                    continue
+                                lid = None
+                                try:
+                                    lid = layer.id()
+                                except Exception:
+                                    lid = None
+                                if lid and lid in union_ids:
+                                    # set this node visible and ensure parents visible
+                                    cur = n
+                                    while cur is not None:
+                                        try:
+                                            cur.setItemVisibilityChecked(True)
+                                        except Exception:
+                                            pass
+                                        try:
+                                            cur = cur.parent()
+                                        except Exception:
+                                            break
+                            except Exception:
+                                continue
+
+                        QgsMessageLog.logMessage(f"テーマ '{theme_name}' を追加表示モードで適用しました", "GEO-search-plugin", 0)
+                    except Exception as e:
+                        try:
+                            QgsMessageLog.logMessage(f"追加表示適用エラー: {str(e)}", "GEO-search-plugin", 2)
+                        except Exception:
+                            pass
+                else:
+                    # 通常モード: そのままテーマを適用（上書き）
+                    theme_collection.applyTheme(theme_name, root, model)
+                    try:
+                        QgsMessageLog.logMessage(f"テーマ '{theme_name}' を適用しました", "GEO-search-plugin", 0)
                     except Exception:
                         pass
-            QgsMessageLog.logMessage(f"テーマ '{theme_name}' を適用しました", "GEO-search-plugin", 0)
+            finally:
+                # フラグを解除
+                try:
+                    self._suppress_theme_update = False
+                except Exception:
+                    pass
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog
