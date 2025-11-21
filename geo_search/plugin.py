@@ -89,6 +89,54 @@ class plugin(object):
         self.action.setObjectName("地図検索")
         self.iface.addToolBarIcon(self.action)
         self.iface.addPluginToMenu("地図検索", self.action)
+        # 追加表示切替アクション（検索アイコンの直後に置く）
+        # reload 時に重複して追加されないよう既存チェックを行う
+        try:
+            if not hasattr(self, 'additive_theme_action') or self.additive_theme_action is None:
+                try:
+                    try:
+                        # prefer custom icons: OFF state 'theme-switch.PNG', ON state 'theme-additive.png'
+                        icon_dir = os.path.join(os.path.dirname(__file__), "icon")
+                        on_icon_path = os.path.join(icon_dir, "theme-additive.png")
+                        off_icon_path = os.path.join(icon_dir, "theme-switch.png")
+                        fallback_icon_path = os.path.join(icon_dir, "qgis-icon.png")
+                        # decide initial icon (start OFF)
+                        initial_icon_path = off_icon_path if os.path.exists(off_icon_path) else fallback_icon_path
+                        self.additive_theme_action = QAction(QIcon(initial_icon_path), "", self.iface.mainWindow())
+                    except Exception:
+                        self.additive_theme_action = QAction("", self.iface.mainWindow())
+                    self.additive_theme_action.setCheckable(True)
+                    self.additive_theme_action.setChecked(False)
+                    self.additive_theme_action.setToolTip("選択したテーマの表示レイヤを現在の表示に追加します（オン：追加表示、オフ：通常上書き）")
+                    try:
+                        # connect to handler that updates internal flag and icon
+                        try:
+                            self.additive_theme_action.toggled.connect(self._on_additive_toggled)
+                        except Exception:
+                            # fallback to simple lambda if method not available
+                            self.additive_theme_action.toggled.connect(lambda checked: setattr(self, '_theme_additive_mode', bool(checked)))
+                    except Exception:
+                        pass
+                    try:
+                        self.iface.addToolBarIcon(self.additive_theme_action)
+                    except Exception:
+                        try:
+                            self.iface.addToolBarWidget(self.additive_theme_action)
+                        except Exception:
+                            pass
+                except Exception:
+                    try:
+                        self._theme_additive_mode = False
+                    except Exception:
+                        pass
+            else:
+                # 既に存在する場合は状態を初期化しておく
+                try:
+                    self.additive_theme_action.setChecked(False)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         
         # テーマ一覧のドロップダウンを作成
         # グループ選択用コンボ（グループを選んでテーマ表示を絞れる）
@@ -108,36 +156,7 @@ class plugin(object):
         self.theme_combobox.setMinimumWidth(180)
         self.iface.addToolBarWidget(self.theme_combobox)
 
-        # テーマ適用モード切替: 通常適用 / 追加表示（現在の表示を保持して追加で表示）
-        # テーマ適用モード切替: 通常適用 / 追加表示（現在の表示を保持して追加で表示）
-        try:
-            from qgis.PyQt.QtWidgets import QAction as QActionClass
-        except Exception:
-            QActionClass = None
         self._theme_additive_mode = False
-        if QActionClass is not None:
-            try:
-                self.additive_theme_action = QActionClass("追加表示", self.iface.mainWindow())
-                self.additive_theme_action.setCheckable(True)
-                self.additive_theme_action.setChecked(False)
-                self.additive_theme_action.setToolTip("選択したテーマの表示レイヤを現在の表示に追加します（オン：追加表示、オフ：通常上書き）")
-                # toggle 挙動を内部フラグに反映
-                try:
-                    self.additive_theme_action.toggled.connect(lambda checked: setattr(self, '_theme_additive_mode', bool(checked)))
-                except Exception:
-                    pass
-                try:
-                    self.iface.addToolBarIcon(self.additive_theme_action)
-                except Exception:
-                    try:
-                        self.iface.addToolBarWidget(self.additive_theme_action)
-                    except Exception:
-                        pass
-            except Exception:
-                try:
-                    self._theme_additive_mode = False
-                except Exception:
-                    pass
 
         # 内部キャッシュ: グループ -> [テーマ名,...]
         self._theme_groups = {}
@@ -208,6 +227,33 @@ class plugin(object):
         except Exception:
             pass
         return ""
+
+    def _on_additive_toggled(self, checked):
+        """Handler for additive_theme_action.toggled
+
+        Updates internal flag and switches the icon between OFF/ON images.
+        """
+        try:
+            # set internal flag
+            self._theme_additive_mode = bool(checked)
+        except Exception:
+            pass
+        try:
+            # update icon according to state
+            icon_dir = os.path.join(os.path.dirname(__file__), "icon")
+            on_icon = os.path.join(icon_dir, "theme-additive.png")
+            off_icon = os.path.join(icon_dir, "theme-switch.PNG")
+            fallback_icon = os.path.join(icon_dir, "qgis-icon.png")
+            if checked:
+                path = on_icon if os.path.exists(on_icon) else fallback_icon
+            else:
+                path = off_icon if os.path.exists(off_icon) else fallback_icon
+            try:
+                self.additive_theme_action.setIcon(QIcon(path))
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _populate_group_combobox(self, grouped):
         """Populate the group combobox from grouped dict."""
@@ -529,6 +575,26 @@ class plugin(object):
                 except Exception:
                     pass
                 self.group_combobox = None
+            # 追加表示アクションの削除
+            if hasattr(self, 'additive_theme_action') and self.additive_theme_action is not None:
+                try:
+                    try:
+                        self.iface.removeToolBarIcon(self.additive_theme_action)
+                    except Exception:
+                        try:
+                            self.iface.removeToolBarWidget(self.additive_theme_action)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                try:
+                    self.additive_theme_action.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    self.additive_theme_action = None
+                except Exception:
+                    pass
         except:
             pass
 
