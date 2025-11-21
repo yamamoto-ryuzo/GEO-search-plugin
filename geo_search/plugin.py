@@ -180,9 +180,49 @@ class plugin(object):
             # 「テーマ選択」というプレースホルダーを追加
             self.theme_combobox.addItem("テーマ選択")
             
-            # マップテーマを追加
-            for theme in themes:
-                self.theme_combobox.addItem(theme)
+            # マップテーマをグループ化して追加（グループ名は括弧で囲まれた部分を抽出）
+            try:
+                from .utils import group_themes
+
+                grouped = group_themes(themes)
+                # 表示順: グループ名のあるものを先、グループなし (None) を最後に
+                named_groups = [g for g in grouped.keys() if g is not None]
+                named_groups.sort()
+
+                for grp in named_groups:
+                    # 見出し／区切りを入れる（モデルにアクセスして見出しを無効化する）
+                    try:
+                        # まずセパレータを挿入
+                        try:
+                            self.theme_combobox.insertSeparator(self.theme_combobox.count())
+                        except Exception:
+                            pass
+                        # 見出しテキストを追加して無効化
+                        self.theme_combobox.addItem(str(grp))
+                        try:
+                            idx = self.theme_combobox.count() - 1
+                            self.theme_combobox.model().item(idx).setEnabled(False)
+                        except Exception:
+                            pass
+                    except Exception:
+                        # 見出し作成に失敗したら無視して通常追加へ
+                        pass
+
+                    for t in grouped.get(grp, []):
+                        self.theme_combobox.addItem(t)
+
+                # グループなしの項目は最後に追加
+                if None in grouped:
+                    try:
+                        self.theme_combobox.insertSeparator(self.theme_combobox.count())
+                    except Exception:
+                        pass
+                    for t in grouped[None]:
+                        self.theme_combobox.addItem(t)
+            except Exception:
+                # フォールバック: グループ化できない場合は従来通り追加
+                for theme in themes:
+                    self.theme_combobox.addItem(theme)
             
             # 前回選択されていたテーマがまだ存在するなら、それを選択状態に
             if current_theme in themes:
