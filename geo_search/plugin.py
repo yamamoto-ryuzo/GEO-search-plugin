@@ -97,6 +97,12 @@ class plugin(object):
         self.group_combobox.setMinimumWidth(140)
         self.iface.addToolBarWidget(self.group_combobox)
 
+        # グループ選択の前回値を保持する（update時に復元するため）
+        self._last_group_selected = None
+
+        # テーマ適用中に自動更新を抑止するフラグ
+        self._suppress_theme_update = False
+
         self.theme_combobox = QComboBox()
         self.theme_combobox.setToolTip("レイヤの表示/非表示を設定するマップテーマを選択（「テーマ選択」で基本表示に戻す）")
         self.theme_combobox.setMinimumWidth(180)
@@ -114,8 +120,8 @@ class plugin(object):
         # 初回更新
         self.update_theme_combobox()
         
-        # コンボボックスの前回の選択値を保存する変数
-        self._last_theme_selected = None
+        # (以前はテーマの前回選択を内部保持していましたが、
+        #  ユーザー操作による自動復元は不要なため削除しました)
         
         # テーマ選択時のイベント接続
         # currentIndexChangedは値が実際に変わった時だけ発火
@@ -177,9 +183,8 @@ class plugin(object):
         try:
             self.group_combobox.blockSignals(True)
             self.group_combobox.clear()
-            # Placeholder + all option
+            # Placeholder, then only actual groups
             self.group_combobox.addItem("グループ選択")
-            self.group_combobox.addItem("すべて")
             for g in sorted([k for k in grouped.keys() if k is not None]):
                 self.group_combobox.addItem(str(g))
         except Exception:
@@ -194,17 +199,35 @@ class plugin(object):
         """Called when user selects a group; filter themes accordingly."""
         try:
             sel = self._safe_current_text(self.group_combobox)
-            if sel == "すべて" or sel == "グループ選択":
-                themes_to_show = [t for lst in self._theme_groups.values() for t in lst]
+            # 記録しておく（次回 update の際に復元に使う）
+            try:
+                self._last_group_selected = sel
+            except Exception:
+                pass
+            # グループ未選択(プレースホルダ) の場合は全てのテーマを表示する
+            if not sel or sel == "グループ選択":
+                try:
+                    themes_to_show = [t for lst in self._theme_groups.values() for t in lst]
+                except Exception:
+                    themes_to_show = []
             else:
+                # 選択されたグループのテーマのみを表示
                 themes_to_show = self._theme_groups.get(sel, [])
 
-            self.theme_combobox.blockSignals(True)
-            self.theme_combobox.clear()
-            self.theme_combobox.addItem("テーマ選択")
-            for t in themes_to_show:
-                self.theme_combobox.addItem(t)
-            self.theme_combobox.blockSignals(False)
+            try:
+                self.theme_combobox.blockSignals(True)
+            except Exception:
+                pass
+            try:
+                self.theme_combobox.clear()
+                self.theme_combobox.addItem("テーマ選択")
+                for t in themes_to_show:
+                    self.theme_combobox.addItem(t)
+            finally:
+                try:
+                    self.theme_combobox.blockSignals(False)
+                except Exception:
+                    pass
         except Exception:
             try:
                 from qgis.core import QgsMessageLog
@@ -215,6 +238,14 @@ class plugin(object):
     def update_theme_combobox(self):
         """マップテーマのコンボボックスを更新する"""
         try:
+            # apply_selected_theme 実行中は外部シグナルによる自動更新を抑止する
+            if getattr(self, '_suppress_theme_update', False):
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("update_theme_combobox: suppressed during theme apply", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+                return
             from qgis.core import QgsProject, QgsMessageLog
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
@@ -244,27 +275,36 @@ class plugin(object):
                 # 保存
                 self._theme_groups = grouped
 
-                # group_combobox を更新（先に）
+                # group_combobox を更新（シグナルをブロックして復元を試みる）
                 try:
-                    self._populate_group_combobox(grouped)
-                except Exception:
-                    pass
+                    prev_group = self._safe_current_text(self.group_combobox)
+                    # ブロックして populate + restore を行う（on_group_changed の誤発火を防ぐ）
+                    try:
+                        self.group_combobox.blockSignals(True)
+                    except Exception:
+                        pass
+                    try:
+                        self._populate_group_combobox(grouped)
+                        # まず以前の表示（UI 上の選択）を優先して復元
+                        if prev_group:
+                            idx_prev = self.group_combobox.findText(prev_group)
+                            if idx_prev >= 0:
+                                self.group_combobox.setCurrentIndex(idx_prev)
+                        # 次にプロセス内で最後に記録された選択を試す
+                        if (not prev_group or self.group_combobox.currentIndex() <= 0) and hasattr(self, '_last_group_selected') and self._last_group_selected:
+                            idx_last = self.group_combobox.findText(self._last_group_selected)
+                            if idx_last >= 0:
+                                self.group_combobox.setCurrentIndex(idx_last)
+                    finally:
+                        try:
+                            self.group_combobox.blockSignals(False)
+                        except Exception:
+                            pass
 
-                # デフォルトは「すべて」を選んで従来の表示を維持
-                default_group = "すべて"
-                try:
-                    idx_all = self.group_combobox.findText(default_group)
-                    if idx_all >= 0:
-                        self.group_combobox.setCurrentIndex(idx_all)
-                except Exception:
-                    pass
-
-                # 現在の group 選択に基づいてテーマを表示
-                try:
+                    # 復元後の group 選択に基づいてテーマを表示
                     cur_group_txt = self._safe_current_text(self.group_combobox)
-                    if cur_group_txt == "すべて":
-                        themes_to_show = [t for lst in grouped.values() for t in lst]
-                    elif cur_group_txt == "グループ選択":
+                    # グループ未選択(プレースホルダ) の場合は全てのテーマを表示する
+                    if not cur_group_txt or cur_group_txt == "グループ選択":
                         themes_to_show = [t for lst in grouped.values() for t in lst]
                     else:
                         themes_to_show = grouped.get(cur_group_txt, [])
@@ -287,12 +327,6 @@ class plugin(object):
                 index = self.theme_combobox.findText(current_theme)
                 if index >= 0:
                     self.theme_combobox.setCurrentIndex(index)
-            # 内部に記録された前回選択があれば、それを優先
-            elif hasattr(self, '_last_theme_selected') and self._last_theme_selected:
-                if self._last_theme_selected in themes:
-                    index = self.theme_combobox.findText(self._last_theme_selected)
-                    if index >= 0:
-                        self.theme_combobox.setCurrentIndex(index)
             
             # デバッグログ
             QgsMessageLog.logMessage(f"テーマリスト更新: {', '.join(themes)}", "GEO-search-plugin", 0)
@@ -327,8 +361,6 @@ class plugin(object):
             # 「テーマ選択」の場合は何もしない
             if current_theme_text == "テーマ選択" or index <= 0:
                 QgsMessageLog.logMessage("テーマ選択のため、適用しませんでした", "GEO-search-plugin", 0)
-                # 選択を記録
-                self._last_theme_selected = current_theme_text
                 return
                 
             # 選択されたテーマを適用
@@ -338,11 +370,25 @@ class plugin(object):
             # (前回と同じ選択でも強制的にテーマを適用)
             root = project.layerTreeRoot()
             model = self.iface.layerTreeView().layerTreeModel()
-            theme_collection.applyTheme(theme_name, root, model)
-            
-            # 今回の選択を記録
-            self._last_theme_selected = current_theme_text
-            
+            # apply 中に mapThemesChanged 等のシグナルが発生して
+            # update_theme_combobox が走ると UI 候補が書き換わる可能性があるため
+            # 一時的に更新を抑止するフラグを立てる
+            try:
+                self._suppress_theme_update = True
+            except Exception:
+                pass
+            try:
+                theme_collection.applyTheme(theme_name, root, model)
+            finally:
+                # イベントループの次回サイクルでフラグを解除する
+                try:
+                    from qgis.PyQt.QtCore import QTimer
+                    QTimer.singleShot(0, lambda: setattr(self, '_suppress_theme_update', False))
+                except Exception:
+                    try:
+                        self._suppress_theme_update = False
+                    except Exception:
+                        pass
             QgsMessageLog.logMessage(f"テーマ '{theme_name}' を適用しました", "GEO-search-plugin", 0)
         except Exception as e:
             try:
