@@ -1122,8 +1122,85 @@ class SearchFeature(object):
             if apply_theme_name:
                 root = project.layerTreeRoot()
                 model = self.iface.layerTreeView().layerTreeModel()
-                theme_collection.applyTheme(apply_theme_name, root, model)
-                QgsMessageLog.logMessage(f"テーマ '{apply_theme_name}' を適用しました", "GEO-search-plugin", 0)
+                # if the feature instance has theme_additive_mode attribute, respect it
+                additive = bool(getattr(self, 'theme_additive_mode', False))
+                if additive:
+                    try:
+                        # collect currently visible layer ids
+                        orig_visible = set()
+                        try:
+                            nodes_before = root.findLayers()
+                        except Exception:
+                            nodes_before = []
+                        for n in nodes_before:
+                            try:
+                                if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
+                                    orig_visible.add(n.layer().id())
+                            except Exception:
+                                continue
+
+                        # apply theme temporarily
+                        theme_collection.applyTheme(apply_theme_name, root, model)
+
+                        # collect theme-visible ids
+                        theme_visible = set()
+                        try:
+                            nodes_after = root.findLayers()
+                        except Exception:
+                            nodes_after = []
+                        for n in nodes_after:
+                            try:
+                                if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
+                                    theme_visible.add(n.layer().id())
+                            except Exception:
+                                continue
+
+                        union_ids = orig_visible.union(theme_visible)
+
+                        # hide all then restore union set
+                        try:
+                            for n in nodes_after:
+                                try:
+                                    n.setItemVisibilityChecked(False)
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
+
+                        for n in nodes_after:
+                            try:
+                                layer = n.layer()
+                                if layer is None:
+                                    continue
+                                lid = None
+                                try:
+                                    lid = layer.id()
+                                except Exception:
+                                    lid = None
+                                if lid and lid in union_ids:
+                                    cur = n
+                                    while cur is not None:
+                                        try:
+                                            cur.setItemVisibilityChecked(True)
+                                        except Exception:
+                                            pass
+                                        try:
+                                            cur = cur.parent()
+                                        except Exception:
+                                            break
+                            except Exception:
+                                continue
+
+                        QgsMessageLog.logMessage(f"テーマ '{apply_theme_name}' を追加表示モードで適用しました", "GEO-search-plugin", 0)
+                    except Exception as e:
+                        try:
+                            QgsMessageLog.logMessage(f"追加表示適用エラー: {str(e)}", "GEO-search-plugin", 2)
+                        except Exception:
+                            pass
+                else:
+                    # normal apply (overwrite)
+                    theme_collection.applyTheme(apply_theme_name, root, model)
+                    QgsMessageLog.logMessage(f"テーマ '{apply_theme_name}' を適用しました", "GEO-search-plugin", 0)
             elif theme_name:
                 QgsMessageLog.logMessage(f"テーマ '{theme_name}' が見つかりません", "GEO-search-plugin", 1)
         except Exception as e:

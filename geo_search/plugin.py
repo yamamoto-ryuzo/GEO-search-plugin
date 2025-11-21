@@ -254,6 +254,32 @@ class plugin(object):
                 pass
         except Exception:
             pass
+        # propagate state to search feature instances so search-time theme application
+        # uses the same additive/overwrite behavior
+        try:
+            v = bool(getattr(self, '_theme_additive_mode', False))
+            try:
+                for f in getattr(self, '_search_features', []):
+                    try:
+                        setattr(f, 'theme_additive_mode', v)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                for group, flist in getattr(self, '_search_group_features', {}).items():
+                    try:
+                        for f in flist:
+                            try:
+                                setattr(f, 'theme_additive_mode', v)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _populate_group_combobox(self, grouped):
         """Populate the group combobox from grouped dict."""
@@ -748,6 +774,12 @@ class plugin(object):
                         andor=" Or ",  # 複数フィールド選択時はOR検索を標準にする
                         page_limit=settings.get("PageLimit", 1000),
                     )
+                # propagate current additive mode to the feature instance so
+                # SearchFeature can respect it when applying themes during search
+                try:
+                    setattr(feature, 'theme_additive_mode', bool(getattr(self, '_theme_additive_mode', False)))
+                except Exception:
+                    pass
                 # groupごとの配列にする必要がある
                 if self.dialog.tab_groups:
                     self._search_group_features[
