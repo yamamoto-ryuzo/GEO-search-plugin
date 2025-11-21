@@ -184,7 +184,7 @@ class plugin(object):
             self.group_combobox.blockSignals(True)
             self.group_combobox.clear()
             # Placeholder, then only actual groups
-            self.group_combobox.addItem("グループ選択")
+            self.group_combobox.addItem("すべて")
             for g in sorted([k for k in grouped.keys() if k is not None]):
                 self.group_combobox.addItem(str(g))
         except Exception:
@@ -204,8 +204,8 @@ class plugin(object):
                 self._last_group_selected = sel
             except Exception:
                 pass
-            # グループ未選択(プレースホルダ) の場合は全てのテーマを表示する
-            if not sel or sel == "グループ選択":
+            # グループ未選択(プレースホルダ 'すべて') の場合は全てのテーマを表示する
+            if not sel or sel == "すべて":
                 try:
                     themes_to_show = [t for lst in self._theme_groups.values() for t in lst]
                 except Exception:
@@ -303,8 +303,8 @@ class plugin(object):
 
                     # 復元後の group 選択に基づいてテーマを表示
                     cur_group_txt = self._safe_current_text(self.group_combobox)
-                    # グループ未選択(プレースホルダ) の場合は全てのテーマを表示する
-                    if not cur_group_txt or cur_group_txt == "グループ選択":
+                    # グループ未選択(プレースホルダ 'すべて') の場合は全てのテーマを表示する
+                    if not cur_group_txt or cur_group_txt == "すべて":
                         themes_to_show = [t for lst in grouped.values() for t in lst]
                     else:
                         themes_to_show = grouped.get(cur_group_txt, [])
