@@ -25,6 +25,7 @@ from .searchfeature import (
     SearchOwnerFeature,
 )
 from .searchdialog import SearchDialog
+from .theme import collect_visible_layers_and_groups, restore_groups_by_paths
 
 # TODO: Fieldの確認
 # TODO: 表示テーブルの順番変更
@@ -227,6 +228,7 @@ class plugin(object):
         except Exception:
             pass
         return ""
+
 
     def _on_additive_toggled(self, checked):
         """Handler for additive_theme_action.toggled
@@ -486,24 +488,16 @@ class plugin(object):
             try:
                 if getattr(self, '_theme_additive_mode', False):
                     try:
-                        # 現在可視なレイヤIDの集合を取得
-                        orig_visible = set()
+                        # collect currently visible layer ids and groups
                         try:
-                            nodes_before = root.findLayers()
+                            orig_visible, orig_visible_groups = collect_visible_layers_and_groups(root)
                         except Exception:
-                            nodes_before = []
-                        for n in nodes_before:
-                            try:
-                                if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
-                                    lid = n.layer().id()
-                                    orig_visible.add(lid)
-                            except Exception:
-                                continue
+                            orig_visible, orig_visible_groups = set(), []
 
-                        # テーマを適用（QGIS側で一時的に切り替える）
+                        # apply theme temporarily
                         theme_collection.applyTheme(theme_name, root, model)
 
-                        # テーマ適用後にテーマ側で可視なレイヤIDを取得
+                        # collect theme-visible ids
                         theme_visible = set()
                         try:
                             nodes_after = root.findLayers()
@@ -512,15 +506,13 @@ class plugin(object):
                         for n in nodes_after:
                             try:
                                 if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
-                                    lid = n.layer().id()
-                                    theme_visible.add(lid)
+                                    theme_visible.add(n.layer().id())
                             except Exception:
                                 continue
 
-                        # union を作成
                         union_ids = orig_visible.union(theme_visible)
 
-                        # まず全レイヤを非表示にしてから union にあるものだけ表示する
+                        # hide all then restore union set
                         try:
                             for n in nodes_after:
                                 try:
@@ -530,7 +522,6 @@ class plugin(object):
                         except Exception:
                             pass
 
-                        # 表示復元（親グループも表示する）
                         for n in nodes_after:
                             try:
                                 layer = n.layer()
@@ -542,7 +533,6 @@ class plugin(object):
                                 except Exception:
                                     lid = None
                                 if lid and lid in union_ids:
-                                    # set this node visible and ensure parents visible
                                     cur = n
                                     while cur is not None:
                                         try:
@@ -555,6 +545,12 @@ class plugin(object):
                                             break
                             except Exception:
                                 continue
+
+                        # restore any visible groups that had no visible layers
+                        try:
+                            restore_groups_by_paths(root, orig_visible_groups)
+                        except Exception:
+                            pass
 
                         QgsMessageLog.logMessage(f"テーマ '{theme_name}' を追加表示モードで適用しました", "GEO-search-plugin", 0)
                     except Exception as e:

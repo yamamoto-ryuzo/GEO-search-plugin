@@ -19,6 +19,109 @@ import os
 import re
 from typing import Iterable, Dict, List, Optional, Tuple
 
+from typing import Tuple as _Tuple, Set
+
+
+def collect_visible_layers_and_groups(root) -> _Tuple[Set[str], List[str]]:
+    """Collect visible layer IDs and visible group paths from a layer tree root.
+
+    Returns (set_of_layer_ids, list_of_group_path_strings).
+    Group path strings use '/' as separator (e.g. 'Parent/Child').
+    This function defensively handles missing QGIS API at import time.
+    """
+    try:
+        from qgis.core import QgsLayerTreeGroup
+    except Exception:
+        QgsLayerTreeGroup = None
+
+    layer_ids = set()
+    group_paths: List[str] = []
+
+    try:
+        try:
+            nodes = root.findLayers()
+        except Exception:
+            nodes = []
+        for n in nodes:
+            try:
+                if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
+                    layer_ids.add(n.layer().id())
+            except Exception:
+                continue
+
+        def _walk_groups(node, path):
+            try:
+                children = node.children()
+            except Exception:
+                return
+            for c in children:
+                try:
+                    if QgsLayerTreeGroup is not None and isinstance(c, QgsLayerTreeGroup):
+                        gp = f"{path}/{c.name()}" if path else c.name()
+                        try:
+                            if c.isVisible():
+                                group_paths.append(gp)
+                        except Exception:
+                            pass
+                        _walk_groups(c, gp)
+                    else:
+                        _walk_groups(c, path)
+                except Exception:
+                    continue
+
+        _walk_groups(root, "")
+    except Exception:
+        pass
+
+    return layer_ids, group_paths
+
+
+def find_group_by_path(root, path):
+    """Find a group node by a '/'-separated path. Returns node or None."""
+    try:
+        from qgis.core import QgsLayerTreeGroup
+    except Exception:
+        QgsLayerTreeGroup = None
+    try:
+        parts = [p for p in path.split('/') if p]
+        node = root
+        for p in parts:
+            found = None
+            try:
+                for child in node.children():
+                    try:
+                        if QgsLayerTreeGroup is not None and isinstance(child, QgsLayerTreeGroup) and child.name() == p:
+                            found = child
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                return None
+            if found is None:
+                return None
+            node = found
+        if QgsLayerTreeGroup is not None and isinstance(node, QgsLayerTreeGroup):
+            return node
+    except Exception:
+        pass
+    return None
+
+
+def restore_groups_by_paths(root, group_paths: List[str]):
+    """Restore visibility for groups specified by path list."""
+    if not group_paths:
+        return
+    for path in group_paths:
+        try:
+            grp = find_group_by_path(root, path)
+            if grp is not None:
+                try:
+                    grp.setItemVisibilityChecked(True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
 
 def _get_theme_brackets() -> Tuple[str, str]:
     """環境変数からテーマのグループ括弧を取得する。
@@ -69,4 +172,11 @@ def group_themes(theme_names: Iterable[str]) -> Dict[Optional[str], List[str]]:
     return groups
 
 
-__all__ = ["_get_theme_brackets", "parse_theme_group", "group_themes"]
+__all__ = [
+    "_get_theme_brackets",
+    "parse_theme_group",
+    "group_themes",
+    "collect_visible_layers_and_groups",
+    "find_group_by_path",
+    "restore_groups_by_paths",
+]

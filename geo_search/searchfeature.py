@@ -1126,18 +1126,11 @@ class SearchFeature(object):
                 additive = bool(getattr(self, 'theme_additive_mode', False))
                 if additive:
                     try:
-                        # collect currently visible layer ids
-                        orig_visible = set()
                         try:
-                            nodes_before = root.findLayers()
+                            from .theme import collect_visible_layers_and_groups
+                            orig_visible, orig_visible_groups = collect_visible_layers_and_groups(root)
                         except Exception:
-                            nodes_before = []
-                        for n in nodes_before:
-                            try:
-                                if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
-                                    orig_visible.add(n.layer().id())
-                            except Exception:
-                                continue
+                            orig_visible, orig_visible_groups = set(), []
 
                         # apply theme temporarily
                         theme_collection.applyTheme(apply_theme_name, root, model)
@@ -1190,6 +1183,13 @@ class SearchFeature(object):
                                             break
                             except Exception:
                                 continue
+
+                        # additionally restore groups that were visible but had no visible layers
+                        try:
+                            from .theme import restore_groups_by_paths
+                            restore_groups_by_paths(root, orig_visible_groups)
+                        except Exception:
+                            pass
 
                         QgsMessageLog.logMessage(f"テーマ '{apply_theme_name}' を追加表示モードで適用しました", "GEO-search-plugin", 0)
                     except Exception as e:
