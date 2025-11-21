@@ -24,7 +24,7 @@ This plugin provides tools to retrieve cadastral lot ("tiban" / 地番) informat
 - English: Configure per-tab search settings (layers, search fields, display fields, and optional map themes). These settings are saved to the QGIS project file so project-specific search configurations can be reused.
 - 日本語: 各検索タブごとの設定（対象レイヤ、検索フィールド、表示フィールド、マップテーマなど）をGUIで編集でき、設定はプロジェクトファイルに保存されます。
 
-詳細なマップテーマの仕組み・設定方法は `geo_search/THEMES.md` を参照してください。
+詳細なマップテーマの仕組み・設定方法は `THEMES.md` を参照してください。
 
 <img width="686" height="740" alt="image" src="https://github.com/user-attachments/assets/27cad15f-890f-4bfc-9c61-3660531e7c32" />
 

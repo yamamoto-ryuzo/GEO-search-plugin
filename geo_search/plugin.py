@@ -91,10 +91,27 @@ class plugin(object):
         self.iface.addPluginToMenu("地図検索", self.action)
         
         # テーマ一覧のドロップダウンを作成
+        # グループ選択用コンボ（グループを選んでテーマ表示を絞れる）
+        self.group_combobox = QComboBox()
+        self.group_combobox.setToolTip("グループを選択して表示するテーマを絞ります（すべて/グループ単位）")
+        self.group_combobox.setMinimumWidth(140)
+        self.iface.addToolBarWidget(self.group_combobox)
+
         self.theme_combobox = QComboBox()
         self.theme_combobox.setToolTip("レイヤの表示/非表示を設定するマップテーマを選択（「テーマ選択」で基本表示に戻す）")
         self.theme_combobox.setMinimumWidth(180)
         self.iface.addToolBarWidget(self.theme_combobox)
+
+        # 内部キャッシュ: グループ -> [テーマ名,...]
+        self._theme_groups = {}
+
+        # 接続: グループ選択でテーマを絞る
+        try:
+            self.group_combobox.currentIndexChanged.connect(self.on_group_changed)
+        except Exception:
+            pass
+
+        # 初回更新
         self.update_theme_combobox()
         
         # コンボボックスの前回の選択値を保存する変数
@@ -155,6 +172,46 @@ class plugin(object):
             pass
         return ""
 
+    def _populate_group_combobox(self, grouped):
+        """Populate the group combobox from grouped dict."""
+        try:
+            self.group_combobox.blockSignals(True)
+            self.group_combobox.clear()
+            # Placeholder + all option
+            self.group_combobox.addItem("グループ選択")
+            self.group_combobox.addItem("すべて")
+            for g in sorted([k for k in grouped.keys() if k is not None]):
+                self.group_combobox.addItem(str(g))
+        except Exception:
+            pass
+        finally:
+            try:
+                self.group_combobox.blockSignals(False)
+            except Exception:
+                pass
+
+    def on_group_changed(self, index):
+        """Called when user selects a group; filter themes accordingly."""
+        try:
+            sel = self._safe_current_text(self.group_combobox)
+            if sel == "すべて" or sel == "グループ選択":
+                themes_to_show = [t for lst in self._theme_groups.values() for t in lst]
+            else:
+                themes_to_show = self._theme_groups.get(sel, [])
+
+            self.theme_combobox.blockSignals(True)
+            self.theme_combobox.clear()
+            self.theme_combobox.addItem("テーマ選択")
+            for t in themes_to_show:
+                self.theme_combobox.addItem(t)
+            self.theme_combobox.blockSignals(False)
+        except Exception:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("group change handling error", "GEO-search-plugin", 2)
+            except Exception:
+                pass
+
     def update_theme_combobox(self):
         """マップテーマのコンボボックスを更新する"""
         try:
@@ -176,49 +233,50 @@ class plugin(object):
             # コンボボックスをクリア
             self.theme_combobox.blockSignals(True)
             self.theme_combobox.clear()
-            
             # 「テーマ選択」というプレースホルダーを追加
             self.theme_combobox.addItem("テーマ選択")
-            
-            # マップテーマをグループ化して追加（グループ名は括弧で囲まれた部分を抽出）
+
+            # マップテーマをグループ化して管理（グループ名は括弧で囲まれた部分を抽出）
             try:
-                from .utils import group_themes
+                from .theme import group_themes
 
                 grouped = group_themes(themes)
+                # 保存
+                self._theme_groups = grouped
+
+                # group_combobox を更新（先に）
+                try:
+                    self._populate_group_combobox(grouped)
+                except Exception:
+                    pass
+
+                # デフォルトは「すべて」を選んで従来の表示を維持
+                default_group = "すべて"
+                try:
+                    idx_all = self.group_combobox.findText(default_group)
+                    if idx_all >= 0:
+                        self.group_combobox.setCurrentIndex(idx_all)
+                except Exception:
+                    pass
+
+                # 現在の group 選択に基づいてテーマを表示
+                try:
+                    cur_group_txt = self._safe_current_text(self.group_combobox)
+                    if cur_group_txt == "すべて":
+                        themes_to_show = [t for lst in grouped.values() for t in lst]
+                    elif cur_group_txt == "グループ選択":
+                        themes_to_show = [t for lst in grouped.values() for t in lst]
+                    else:
+                        themes_to_show = grouped.get(cur_group_txt, [])
+                except Exception:
+                    themes_to_show = [t for lst in grouped.values() for t in lst]
                 # 表示順: グループ名のあるものを先、グループなし (None) を最後に
                 named_groups = [g for g in grouped.keys() if g is not None]
                 named_groups.sort()
 
-                for grp in named_groups:
-                    # 見出し／区切りを入れる（モデルにアクセスして見出しを無効化する）
-                    try:
-                        # まずセパレータを挿入
-                        try:
-                            self.theme_combobox.insertSeparator(self.theme_combobox.count())
-                        except Exception:
-                            pass
-                        # 見出しテキストを追加して無効化
-                        self.theme_combobox.addItem(str(grp))
-                        try:
-                            idx = self.theme_combobox.count() - 1
-                            self.theme_combobox.model().item(idx).setEnabled(False)
-                        except Exception:
-                            pass
-                    except Exception:
-                        # 見出し作成に失敗したら無視して通常追加へ
-                        pass
-
-                    for t in grouped.get(grp, []):
-                        self.theme_combobox.addItem(t)
-
-                # グループなしの項目は最後に追加
-                if None in grouped:
-                    try:
-                        self.theme_combobox.insertSeparator(self.theme_combobox.count())
-                    except Exception:
-                        pass
-                    for t in grouped[None]:
-                        self.theme_combobox.addItem(t)
+                # themes_to_show をコンボに追加
+                for t in themes_to_show:
+                    self.theme_combobox.addItem(t)
             except Exception:
                 # フォールバック: グループ化できない場合は従来通り追加
                 for theme in themes:
@@ -306,6 +364,12 @@ class plugin(object):
             if hasattr(self, 'theme_combobox'):
                 self.theme_combobox.deleteLater()
                 self.theme_combobox = None
+            if hasattr(self, 'group_combobox'):
+                try:
+                    self.group_combobox.deleteLater()
+                except Exception:
+                    pass
+                self.group_combobox = None
         except:
             pass
 

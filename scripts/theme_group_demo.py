@@ -7,42 +7,12 @@
     THEME_BRACKET_OPEN  (例: '[' )
     THEME_BRACKET_CLOSE (例: ']' )
 """
+import sys
 import os
-import re
 
-
-def _get_theme_brackets():
-    open_b = os.environ.get("THEME_BRACKET_OPEN")
-    close_b = os.environ.get("THEME_BRACKET_CLOSE")
-    if open_b is None and close_b is None:
-        return "【", "】"
-    if open_b is None:
-        open_b = "【"
-    if close_b is None:
-        close_b = "】"
-    return open_b, close_b
-
-
-def parse_theme_group(theme_name):
-    if not theme_name:
-        return None
-    open_b, close_b = _get_theme_brackets()
-    try:
-        pattern = re.escape(open_b) + r"(.*?)" + re.escape(close_b)
-        m = re.search(pattern, theme_name)
-    except re.error:
-        return None
-    if m:
-        return m.group(1)
-    return None
-
-
-def group_themes(theme_names):
-    groups = {}
-    for name in theme_names:
-        grp = parse_theme_group(name)
-        groups.setdefault(grp, []).append(name)
-    return groups
+# スクリプト直実行時にリポジトリルートをパスに追加してパッケージ import を可能にする
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from geo_search.theme import _get_theme_brackets, group_themes
 
 
 if __name__ == '__main__':
