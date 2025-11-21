@@ -1118,89 +1118,16 @@ class SearchFeature(object):
                 # 「検索前」テーマを使用
                 apply_theme_name = "検索前"
             
-            # テーマを適用
+            # テーマを適用（共通ヘルパーを使用）
             if apply_theme_name:
                 root = project.layerTreeRoot()
                 model = self.iface.layerTreeView().layerTreeModel()
-                # if the feature instance has theme_additive_mode attribute, respect it
                 additive = bool(getattr(self, 'theme_additive_mode', False))
-                if additive:
-                    try:
-                        try:
-                            from .theme import collect_visible_layers_and_groups
-                            orig_visible, orig_visible_groups = collect_visible_layers_and_groups(root)
-                        except Exception:
-                            orig_visible, orig_visible_groups = set(), []
-
-                        # apply theme temporarily
-                        theme_collection.applyTheme(apply_theme_name, root, model)
-
-                        # collect theme-visible ids
-                        theme_visible = set()
-                        try:
-                            nodes_after = root.findLayers()
-                        except Exception:
-                            nodes_after = []
-                        for n in nodes_after:
-                            try:
-                                if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
-                                    theme_visible.add(n.layer().id())
-                            except Exception:
-                                continue
-
-                        union_ids = orig_visible.union(theme_visible)
-
-                        # hide all then restore union set
-                        try:
-                            for n in nodes_after:
-                                try:
-                                    n.setItemVisibilityChecked(False)
-                                except Exception:
-                                    continue
-                        except Exception:
-                            pass
-
-                        for n in nodes_after:
-                            try:
-                                layer = n.layer()
-                                if layer is None:
-                                    continue
-                                lid = None
-                                try:
-                                    lid = layer.id()
-                                except Exception:
-                                    lid = None
-                                if lid and lid in union_ids:
-                                    cur = n
-                                    while cur is not None:
-                                        try:
-                                            cur.setItemVisibilityChecked(True)
-                                        except Exception:
-                                            pass
-                                        try:
-                                            cur = cur.parent()
-                                        except Exception:
-                                            break
-                            except Exception:
-                                continue
-
-                        # additionally restore groups that were visible but had no visible layers
-                        try:
-                            from .theme import restore_groups_by_paths
-                            restore_groups_by_paths(root, orig_visible_groups)
-                        except Exception:
-                            pass
-
-                        QgsMessageLog.logMessage(f"テーマ '{apply_theme_name}' を追加表示モードで適用しました", "GEO-search-plugin", 0)
-                    except Exception as e:
-                        try:
-                            QgsMessageLog.logMessage(f"追加表示適用エラー: {str(e)}", "GEO-search-plugin", 2)
-                        except Exception:
-                            pass
-                else:
-                    # normal apply (overwrite)
-                    theme_collection.applyTheme(apply_theme_name, root, model)
-                    QgsMessageLog.logMessage(f"テーマ '{apply_theme_name}' を適用しました", "GEO-search-plugin", 0)
+                try:
+                    from .theme import apply_theme
+                    apply_theme(theme_collection, apply_theme_name, root, model, additive=additive)
+                except Exception:
+                    pass
             elif theme_name:
                 QgsMessageLog.logMessage(f"テーマ '{theme_name}' が見つかりません", "GEO-search-plugin", 1)
         except Exception as e:

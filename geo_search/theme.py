@@ -123,6 +123,110 @@ def restore_groups_by_paths(root, group_paths: List[str]):
             pass
 
 
+def apply_theme(theme_collection, theme_name: str, root, model, additive: bool = False):
+    """Apply a map theme via the provided theme_collection.
+
+    If ``additive`` is True, the theme's visible layers are merged with the
+    currently visible layers (so theme layers are added to the current view
+    rather than overwriting). Group visibility that had no visible layers is
+    also preserved.
+
+    This function centralizes the additive application logic used by the
+    plugin toolbar and search-time theme application.
+    """
+    try:
+        from qgis.core import QgsMessageLog
+    except Exception:
+        QgsMessageLog = None
+
+    if not theme_name:
+        return
+
+    try:
+        if additive:
+            try:
+                orig_visible, orig_visible_groups = collect_visible_layers_and_groups(root)
+            except Exception:
+                orig_visible, orig_visible_groups = set(), []
+
+            # apply theme (this will change node visibility)
+            theme_collection.applyTheme(theme_name, root, model)
+
+            # collect ids visible after apply
+            theme_visible = set()
+            try:
+                nodes_after = root.findLayers()
+            except Exception:
+                nodes_after = []
+            for n in nodes_after:
+                try:
+                    if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
+                        theme_visible.add(n.layer().id())
+                except Exception:
+                    continue
+
+            union_ids = orig_visible.union(theme_visible)
+
+            # hide all then restore union set
+            try:
+                for n in nodes_after:
+                    try:
+                        n.setItemVisibilityChecked(False)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            for n in nodes_after:
+                try:
+                    layer = n.layer()
+                    if layer is None:
+                        continue
+                    lid = None
+                    try:
+                        lid = layer.id()
+                    except Exception:
+                        lid = None
+                    if lid and lid in union_ids:
+                        cur = n
+                        while cur is not None:
+                            try:
+                                cur.setItemVisibilityChecked(True)
+                            except Exception:
+                                pass
+                            try:
+                                cur = cur.parent()
+                            except Exception:
+                                break
+                except Exception:
+                    continue
+
+            # restore any visible groups that had no visible layers
+            try:
+                restore_groups_by_paths(root, orig_visible_groups)
+            except Exception:
+                pass
+
+            if QgsMessageLog:
+                try:
+                    QgsMessageLog.logMessage(f"テーマ '{theme_name}' を追加表示モードで適用しました", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+        else:
+            theme_collection.applyTheme(theme_name, root, model)
+            if QgsMessageLog:
+                try:
+                    QgsMessageLog.logMessage(f"テーマ '{theme_name}' を適用しました", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+    except Exception as e:
+        if QgsMessageLog:
+            try:
+                QgsMessageLog.logMessage(f"テーマ適用エラー: {str(e)}", "GEO-search-plugin", 2)
+            except Exception:
+                pass
+
+
 def _get_theme_brackets() -> Tuple[str, str]:
     """環境変数からテーマのグループ括弧を取得する。
 
@@ -173,6 +277,7 @@ def group_themes(theme_names: Iterable[str]) -> Dict[Optional[str], List[str]]:
 
 
 __all__ = [
+    "apply_theme",
     "_get_theme_brackets",
     "parse_theme_group",
     "group_themes",

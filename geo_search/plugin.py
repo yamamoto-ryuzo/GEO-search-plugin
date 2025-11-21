@@ -25,7 +25,7 @@ from .searchfeature import (
     SearchOwnerFeature,
 )
 from .searchdialog import SearchDialog
-from .theme import collect_visible_layers_and_groups, restore_groups_by_paths
+from .theme import apply_theme
 
 # TODO: Fieldの確認
 # TODO: 表示テーブルの順番変更
@@ -175,10 +175,8 @@ class plugin(object):
         #  ユーザー操作による自動復元は不要なため削除しました)
         
         # テーマ選択時のイベント接続
-        # currentIndexChangedは値が実際に変わった時だけ発火
-        self.theme_combobox.currentIndexChanged.connect(self.apply_selected_theme)
-        
-        # activatedシグナルはクリックやキー操作で選択した時に必ず発火（同じ項目を選んだ場合も）
+        # Note: connect only to `activated` to avoid duplicate calls because
+        # `currentIndexChanged` may also fire for programmatic changes.
         try:
             self.theme_combobox.activated.connect(self.apply_selected_theme)
         except Exception:
@@ -448,6 +446,18 @@ class plugin(object):
     
     def apply_selected_theme(self, index):
         """選択されたテーマを適用する"""
+        # prevent re-entrant/duplicate applies
+        if getattr(self, '_applying_theme', False):
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("apply_selected_theme: re-entrant call ignored", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+            return
+        try:
+            self._applying_theme = True
+        except Exception:
+            pass
         try:
             from qgis.core import QgsProject, QgsMessageLog
             project = QgsProject.instance()
@@ -484,91 +494,18 @@ class plugin(object):
             except Exception:
                 pass
 
-            # 追加表示モードの場合は、選択テーマで可視になるレイヤを現在の表示に上乗せする
+            # apply theme via centralized helper (supports additive mode)
             try:
-                if getattr(self, '_theme_additive_mode', False):
-                    try:
-                        # collect currently visible layer ids and groups
-                        try:
-                            orig_visible, orig_visible_groups = collect_visible_layers_and_groups(root)
-                        except Exception:
-                            orig_visible, orig_visible_groups = set(), []
-
-                        # apply theme temporarily
-                        theme_collection.applyTheme(theme_name, root, model)
-
-                        # collect theme-visible ids
-                        theme_visible = set()
-                        try:
-                            nodes_after = root.findLayers()
-                        except Exception:
-                            nodes_after = []
-                        for n in nodes_after:
-                            try:
-                                if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
-                                    theme_visible.add(n.layer().id())
-                            except Exception:
-                                continue
-
-                        union_ids = orig_visible.union(theme_visible)
-
-                        # hide all then restore union set
-                        try:
-                            for n in nodes_after:
-                                try:
-                                    n.setItemVisibilityChecked(False)
-                                except Exception:
-                                    continue
-                        except Exception:
-                            pass
-
-                        for n in nodes_after:
-                            try:
-                                layer = n.layer()
-                                if layer is None:
-                                    continue
-                                lid = None
-                                try:
-                                    lid = layer.id()
-                                except Exception:
-                                    lid = None
-                                if lid and lid in union_ids:
-                                    cur = n
-                                    while cur is not None:
-                                        try:
-                                            cur.setItemVisibilityChecked(True)
-                                        except Exception:
-                                            pass
-                                        try:
-                                            cur = cur.parent()
-                                        except Exception:
-                                            break
-                            except Exception:
-                                continue
-
-                        # restore any visible groups that had no visible layers
-                        try:
-                            restore_groups_by_paths(root, orig_visible_groups)
-                        except Exception:
-                            pass
-
-                        QgsMessageLog.logMessage(f"テーマ '{theme_name}' を追加表示モードで適用しました", "GEO-search-plugin", 0)
-                    except Exception as e:
-                        try:
-                            QgsMessageLog.logMessage(f"追加表示適用エラー: {str(e)}", "GEO-search-plugin", 2)
-                        except Exception:
-                            pass
-                else:
-                    # 通常モード: そのままテーマを適用（上書き）
-                    theme_collection.applyTheme(theme_name, root, model)
-                    try:
-                        QgsMessageLog.logMessage(f"テーマ '{theme_name}' を適用しました", "GEO-search-plugin", 0)
-                    except Exception:
-                        pass
+                from .theme import apply_theme
+                apply_theme(theme_collection, theme_name, root, model, additive=bool(getattr(self, '_theme_additive_mode', False)))
             finally:
                 # フラグを解除
                 try:
                     self._suppress_theme_update = False
+                except Exception:
+                    pass
+                try:
+                    self._applying_theme = False
                 except Exception:
                     pass
         except Exception as e:
