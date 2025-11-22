@@ -22,6 +22,245 @@ from typing import Iterable, Dict, List, Optional, Tuple
 
 
 
+def save_current_state_as_temp_theme(
+    theme_collection,
+    tmp_name: str,
+    root=None,
+    model=None,
+    log_func=None,
+    summarize_func=None,
+):
+    """Create a theme object from the current project state and save it
+    into `theme_collection` under `tmp_name`.
+
+    Returns a tuple ``(prev_theme, saved)`` where ``saved`` is True when the
+    temporary theme was successfully inserted/updated into the collection.
+    ``log_func`` (callable) and ``summarize_func`` (callable) are optional
+    hooks used for logging.
+    """
+    prev_theme = None
+    try:
+        # テーマオブジェクトを作成（API の違いに対応）
+        if hasattr(theme_collection, "createThemeFromCurrentState"):
+            try:
+                prev_theme = theme_collection.createThemeFromCurrentState(root, model)
+            except Exception:
+                try:
+                    prev_theme = theme_collection.createThemeFromCurrentState(root)
+                except Exception:
+                    prev_theme = None
+        else:
+            # クラスメソッド経由の生成を試す
+            try:
+                from qgis.core import QgsMapThemeCollection
+
+                try:
+                    prev_theme = QgsMapThemeCollection.createThemeFromCurrentState(root, model)
+                except Exception:
+                    prev_theme = QgsMapThemeCollection.createThemeFromCurrentState(root)
+            except Exception:
+                prev_theme = None
+    except Exception:
+        prev_theme = None
+
+    saved = False
+    if prev_theme is not None:
+        try:
+            # 既存の API 名を試す
+            if hasattr(theme_collection, "hasMapTheme") and hasattr(theme_collection, "update"):
+                try:
+                    if theme_collection.hasMapTheme(tmp_name):
+                        theme_collection.update(tmp_name, prev_theme)
+                        saved = True
+                    else:
+                        theme_collection.insert(tmp_name, prev_theme)
+                        saved = True
+                except Exception:
+                    saved = False
+            else:
+                for add_name in ("insert", "addMapTheme", "addTheme", "add"):
+                    if hasattr(theme_collection, add_name):
+                        try:
+                            getattr(theme_collection, add_name)(tmp_name, prev_theme)
+                            saved = True
+                            break
+                        except Exception:
+                            continue
+        except Exception:
+            saved = False
+
+        if saved and log_func is not None:
+            try:
+                summary = summarize_func(prev_theme) if summarize_func else None
+            except Exception:
+                summary = "<unable to summarize>"
+            try:
+                if summary:
+                    log_func(f"[テーマログ] prev_theme をコレクションに保存しました: {summary}", 0)
+                else:
+                    log_func("[テーマログ] prev_theme をコレクションに保存しました", 0)
+            except Exception:
+                pass
+
+    return prev_theme, saved
+
+
+def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: str = "GEO-search-plugin"):
+    """Collect messages for layers that are visible in the layer tree and emit
+    them to the QGIS message log (or stdout when unavailable).
+
+    If `log_layer_legend_state_func` is supplied it will be called for each
+    visible layer to emit additional legend-state logs; failures are ignored.
+
+    Returns the list of message strings that were emitted.
+    """
+    messages = []
+    try:
+        try:
+            nodes = root.findLayers()
+        except Exception:
+            nodes = []
+
+        order = 0
+        for n in nodes:
+            try:
+                is_vis = False
+                try:
+                    is_vis = bool(n.isVisible())
+                except Exception:
+                    is_vis = False
+                if not is_vis:
+                    order += 1
+                    continue
+
+                try:
+                    layer = n.layer()
+                except Exception:
+                    layer = None
+                if layer is None:
+                    order += 1
+                    continue
+
+                try:
+                    lid = layer.id() if callable(getattr(layer, "id", None)) else getattr(layer, "id", None)
+                except Exception:
+                    try:
+                        lid = layer.id()
+                    except Exception:
+                        lid = None
+                try:
+                    lname = layer.name()
+                except Exception:
+                    try:
+                        lname = getattr(layer, "name", "")
+                    except Exception:
+                        lname = ""
+
+                messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
+                # Optionally emit legend-state logs for each layer
+                if log_layer_legend_state_func is not None:
+                    try:
+                        log_layer_legend_state_func(layer, tag=tag)
+                    except Exception:
+                        pass
+
+                order += 1
+            except Exception:
+                continue
+    except Exception:
+        messages = ["[テーマログ] レイヤ一覧の取得に失敗しました"]
+
+    # Emit messages using QgsMessageLog when available, otherwise print
+    try:
+        from qgis.core import QgsMessageLog
+    except Exception:
+        QgsMessageLog = None
+
+    for m in messages:
+        try:
+            if QgsMessageLog is not None:
+                try:
+                    QgsMessageLog.logMessage(m, tag, 0)
+                except Exception:
+                    print(m)
+            else:
+                print(m)
+        except Exception:
+            try:
+                print(m)
+            except Exception:
+                pass
+
+    return messages
+
+
+def restore_and_remove_temp_theme(
+    theme_collection,
+    tmp_name: str,
+    root=None,
+    model=None,
+    log_func=None,
+    short_func=None,
+):
+    """Apply a temporary theme by name to restore previous state and then
+    remove the temporary theme from the collection.
+
+    Returns True if removal succeeded (or at least an attempt was made),
+    False otherwise. Logging is performed via `log_func` when provided.
+    """
+    try:
+        if not tmp_name:
+            return False
+
+        # apply the temp theme (prefer applyTheme with root/model)
+        try:
+            try:
+                theme_collection.applyTheme(tmp_name, root, model)
+            except Exception:
+                theme_collection.applyTheme(tmp_name)
+            if log_func is not None:
+                try:
+                    log_func("[テーマログ] 一時テーマを適用しました", 0)
+                except Exception:
+                    pass
+        except Exception as e:
+            try:
+                if log_func is not None:
+                    log_func(f"[テーマログ] 一時テーマの適用に失敗しました: {short_func(e,200) if short_func is not None else str(e)}", 2)
+            except Exception:
+                pass
+            # continue to attempt deletion even if apply failed
+
+        # attempt to remove the temporary theme from the collection
+        try:
+            for rem_name in ("removeMapTheme", "remove", "deleteTheme", "removeTheme"):
+                if hasattr(theme_collection, rem_name):
+                    try:
+                        getattr(theme_collection, rem_name)(tmp_name)
+                        if log_func is not None:
+                            try:
+                                log_func("[テーマログ] 一時テーマを削除しました", 0)
+                            except Exception:
+                                pass
+                        return True
+                    except Exception:
+                        continue
+        except Exception:
+            try:
+                if log_func is not None:
+                    log_func("[テーマログ] 一時テーマの削除で例外が発生しました", 2)
+            except Exception:
+                pass
+
+        return False
+    except Exception:
+        try:
+            if log_func is not None:
+                log_func("[テーマログ] prev_theme 復元の最外部で例外が発生しました", 2)
+        except Exception:
+            pass
+        return False
+
 
 def apply_theme(theme_collection, theme_name: str, root, model, additive: bool = False):
     """Apply a map theme via the provided theme_collection.
@@ -134,69 +373,12 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
         tmp_name = "__geo_search_tmp__geo_search__"
         prev_saved = False
         try:
-            # 現在の状態を保存（可能ならば）
-            # ここでは一時テーマとしてプロジェクトのテーマコレクションに登録して復元を行う。
-            prev_theme = None
-            try:
-                # テーマオブジェクトを作成（API の違いに対応）
-                if hasattr(theme_collection, "createThemeFromCurrentState"):
-                    try:
-                        prev_theme = theme_collection.createThemeFromCurrentState(root, model)
-                    except Exception:
-                        try:
-                            prev_theme = theme_collection.createThemeFromCurrentState(root)
-                        except Exception:
-                            prev_theme = None
-                else:
-                    # クラスメソッド経由の生成を試す
-                    try:
-                        from qgis.core import QgsMapThemeCollection
-                        try:
-                            prev_theme = QgsMapThemeCollection.createThemeFromCurrentState(root, model)
-                        except Exception:
-                            prev_theme = QgsMapThemeCollection.createThemeFromCurrentState(root)
-                    except Exception:
-                        prev_theme = None
-            except Exception:
-                prev_theme = None
-
-            # 作成できたらコレクションへ保存（既存なら更新、無ければ挿入）
-            if prev_theme is not None:
-                saved = False
-                try:
-                    # 既存の API 名を試す
-                    if hasattr(theme_collection, "hasMapTheme") and hasattr(theme_collection, "update"):
-                        try:
-                            if theme_collection.hasMapTheme(tmp_name):
-                                theme_collection.update(tmp_name, prev_theme)
-                                saved = True
-                            else:
-                                theme_collection.insert(tmp_name, prev_theme)
-                                saved = True
-                        except Exception:
-                            saved = False
-                    else:
-                        for add_name in ("insert", "addMapTheme", "addTheme", "add"):
-                            if hasattr(theme_collection, add_name):
-                                try:
-                                    getattr(theme_collection, add_name)(tmp_name, prev_theme)
-                                    saved = True
-                                    break
-                                except Exception:
-                                    continue
-                except Exception:
-                    saved = False
-
-                if saved:
-                    prev_saved = True
-                    try:
-                        summary = _summarize_theme(prev_theme)
-                    except Exception:
-                        summary = "<unable to summarize>"
-                    try:
-                        _log(f"[テーマログ] prev_theme をコレクションに保存しました: {summary}", 0)
-                    except Exception:
-                        pass
+            # 現在の状態を保存（可能ならば） - 関数化して処理を委譲
+            prev_theme, saved = save_current_state_as_temp_theme(
+                theme_collection, tmp_name, root, model, log_func=_log, summarize_func=_summarize_theme
+            )
+            if saved:
+                prev_saved = True
 
             # 選択テーマを適用（root/model バージョンを優先）
             try:
@@ -212,110 +394,18 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                         pass
                 return
             
-            # 凡例ノード（レイヤパネルの表示チェック）のみで判定するユーティリティ群
-
+            # 凡例ノード（レイヤパネルの表示チェック）のみで判定
             # 選択テーマ適用後、レイヤパネルで可視になっているレイヤ一覧をログ出力
-            messages = []
-            try:
-                try:
-                    nodes = root.findLayers()
-                except Exception:
-                    nodes = []
-
-                order = 0
-                for n in nodes:
-                    try:
-                        is_vis = False
-                        try:
-                            is_vis = bool(n.isVisible())
-                        except Exception:
-                            is_vis = False
-                        if not is_vis:
-                            order += 1
-                            continue
-
-                        try:
-                            layer = n.layer()
-                        except Exception:
-                            layer = None
-                        if layer is None:
-                            order += 1
-                            continue
-
-                        try:
-                            lid = layer.id() if callable(getattr(layer, "id", None)) else getattr(layer, "id", None)
-                        except Exception:
-                            try:
-                                lid = layer.id()
-                            except Exception:
-                                lid = None
-                        try:
-                            lname = layer.name()
-                        except Exception:
-                            try:
-                                lname = getattr(layer, "name", "")
-                            except Exception:
-                                lname = ""
-
-                        messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
-                        # そのレイヤに対応する凡例ノード（チェックボックス状態）をログ出力
-                        try:
-                            # モジュール内のユーティリティを使ってレイヤ単位でログ出力
-                            try:
-                                log_layer_legend_state(layer, tag="GEO-search-plugin")
-                            except Exception:
-                                # 何らかの理由でログ出力に失敗しても処理を継続
-                                pass
-                        except Exception:
-                            pass
-
-                        order += 1
-                    except Exception:
-                        continue
-            except Exception:
-                messages = ["[テーマログ] レイヤ一覧の取得に失敗しました"]
-
-            for m in messages:
-                try:
-                    if QgsMessageLog:
-                        try:
-                            QgsMessageLog.logMessage(m, "GEO-search-plugin", 0)
-                        except Exception:
-                            print(m)
-                    else:
-                        print(m)
-                except Exception:
-                    try:
-                        print(m)
-                    except Exception:
-                        pass
+            # collect_visible_layer_messages は内部でメッセージ出力を行う
+            collect_visible_layer_messages(root, log_layer_legend_state)
  
         finally:
             # 元の状態を復元: コレクションに保存した一時テーマ名で適用して削除する
             try:
                 if prev_saved:
-                    try:
-                        _log("[テーマログ] 一時テーマからの復元を試みます", 0)
-                        try:
-                            theme_collection.applyTheme(tmp_name, root, model)
-                        except Exception:
-                            theme_collection.applyTheme(tmp_name)
-                        _log("[テーマログ] 一時テーマを適用しました", 0)
-                    except Exception as e:
-                        _log(f"[テーマログ] 一時テーマの適用に失敗しました: {_short(e,200)}", 2)
-
-                    # 削除
-                    try:
-                        for rem_name in ("removeMapTheme", "remove", "deleteTheme", "removeTheme"):
-                            if hasattr(theme_collection, rem_name):
-                                try:
-                                    getattr(theme_collection, rem_name)(tmp_name)
-                                    _log("[テーマログ] 一時テーマを削除しました", 0)
-                                    break
-                                except Exception:
-                                    continue
-                    except Exception:
-                        _log("[テーマログ] 一時テーマの削除で例外が発生しました", 2)
+                    restore_and_remove_temp_theme(
+                        theme_collection, tmp_name, root, model, log_func=_log, short_func=_short
+                    )
             except Exception:
                 try:
                     _log("[テーマログ] prev_theme 復元の最外部で例外が発生しました", 2)
