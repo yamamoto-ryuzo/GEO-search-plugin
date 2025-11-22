@@ -92,6 +92,71 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                 return
             
             # 凡例ノード（レイヤパネルの表示チェック）のみで判定するユーティリティ群
+
+            # 選択テーマ適用後、レイヤパネルで可視になっているレイヤ一覧をログ出力
+            messages = []
+            try:
+                try:
+                    nodes = root.findLayers()
+                except Exception:
+                    nodes = []
+
+                order = 0
+                for n in nodes:
+                    try:
+                        is_vis = False
+                        try:
+                            is_vis = bool(n.isVisible())
+                        except Exception:
+                            is_vis = False
+                        if not is_vis:
+                            order += 1
+                            continue
+
+                        try:
+                            layer = n.layer()
+                        except Exception:
+                            layer = None
+                        if layer is None:
+                            order += 1
+                            continue
+
+                        try:
+                            lid = layer.id() if callable(getattr(layer, "id", None)) else getattr(layer, "id", None)
+                        except Exception:
+                            try:
+                                lid = layer.id()
+                            except Exception:
+                                lid = None
+                        try:
+                            lname = layer.name()
+                        except Exception:
+                            try:
+                                lname = getattr(layer, "name", "")
+                            except Exception:
+                                lname = ""
+
+                        messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
+                        order += 1
+                    except Exception:
+                        continue
+            except Exception:
+                messages = ["[テーマログ] レイヤ一覧の取得に失敗しました"]
+
+            for m in messages:
+                try:
+                    if QgsMessageLog:
+                        try:
+                            QgsMessageLog.logMessage(m, "GEO-search-plugin", 0)
+                        except Exception:
+                            print(m)
+                    else:
+                        print(m)
+                except Exception:
+                    try:
+                        print(m)
+                    except Exception:
+                        pass
  
         finally:
             # 元の状態を復元（登録できた一時テーマ名があれば適用してから削除）
