@@ -46,7 +46,8 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
 
     if additive:
         # 追加表示モード（試験実装）:
-        # - 選択テーマを一時的に適用して、表示されるレイヤとそのシンボロジ情報をログに出力します。
+        # - 選択テーマを一時的に適用して、表示されるレイヤと
+        #   かつシンボルのアルファが0でないルールのみをログ出力します。
         # - それ以外の追加表示（和集合）ロジックはまだ実装しません。
         tmp_name = "__geo_search_tmp__geo_search__"
         prev_saved = False
@@ -88,13 +89,31 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                         QgsMessageLog.logMessage(f"テーマ適用エラー(ログ用): {e}", "GEO-search-plugin", 2)
                     except Exception:
                         pass
-                # 適用できなければログ出力できないので戻る
                 return
 
-            # テーマ適用後に表示されているレイヤとシンボロジを列挙してログ出力
+            # テーマ適用後に表示されているレイヤと、ルールごとの
+            # フィルタ: ルールがスタイルとして有効（enabled）かを判定し、
+            # 有効なルールのみログ対象とします。シンボルの alpha 情報は
+            # 参考として収集します（追加の除外条件として維持）。
             messages = []
+            # ルールがスタイルとして有効かを判定するユーティリティ
+            def _is_rule_enabled(rule):
+                try:
+                    for name in ("isEnabled", "enabled", "isActive", "active", "isVisible"):
+                        if hasattr(rule, name):
+                            try:
+                                val = getattr(rule, name)
+                                v = val() if callable(val) else val
+                                if v is False:
+                                    return False
+                                if v is True:
+                                    return True
+                            except Exception:
+                                continue
+                    return True
+                except Exception:
+                    return True
             try:
-                nodes = []
                 try:
                     nodes = root.findLayers()
                 except Exception:
@@ -103,14 +122,14 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                 order = 0
                 for n in nodes:
                     try:
-                        visible = False
+                        node_visible = False
                         try:
-                            visible = bool(n.isVisible())
+                            node_visible = bool(n.isVisible())
                         except Exception:
-                            visible = False
-                        if not visible:
+                            node_visible = False
+                        if not node_visible:
                             continue
-                        layer = None
+
                         try:
                             layer = n.layer()
                         except Exception:
@@ -118,8 +137,6 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                         if layer is None:
                             continue
 
-                        lid = None
-                        lname = ""
                         try:
                             lid = layer.id() if callable(getattr(layer, "id", None)) else getattr(layer, "id", None)
                         except Exception:
@@ -135,8 +152,7 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                             except Exception:
                                 lname = ""
 
-                        # シンボロジ情報を安全に抽出
-                        renderer_info = None
+                        # ルールベースレンダラーのルールごとにシンボル層のアルファを調べる
                         try:
                             rend = None
                             try:
@@ -146,26 +162,165 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                                     rend = layer.renderer()
                                 except Exception:
                                     rend = None
-                            if rend is not None:
-                                # 優先順で試す
-                                if hasattr(rend, "dump"):
-                                    try:
-                                        renderer_info = rend.dump()
-                                    except Exception:
-                                        renderer_info = repr(rend)
-                                elif hasattr(rend, "toJson"):
-                                    try:
-                                        renderer_info = rend.toJson()
-                                    except Exception:
-                                        renderer_info = repr(rend)
-                                else:
-                                    renderer_info = repr(rend)
-                        except Exception:
-                            renderer_info = None
 
-                        msg = f"[テーマログ] layer order={order} id={lid} name='{lname}' renderer={renderer_info}"
-                        messages.append(msg)
-                        order += 1
+                            rules = []
+                            if rend is not None:
+                                root_rule = None
+                                try:
+                                    root_rule = getattr(rend, "rootRule", lambda: None)()
+                                except Exception:
+                                    root_rule = getattr(rend, "root", None)
+                                if root_rule is not None:
+                                    try:
+                                        rules = getattr(root_rule, "children", lambda: getattr(root_rule, "rules", lambda: []) )()
+                                    except Exception:
+                                        try:
+                                            rules = root_rule.rules()
+                                        except Exception:
+                                            rules = []
+                                else:
+                                    # categorized 等のフォールバック
+                                    try:
+                                        cats = getattr(rend, "categories", None)
+                                        if callable(cats):
+                                            rules = cats()
+                                    except Exception:
+                                        rules = []
+
+                            # ルールが見つからない場合は renderer の要約を出す（ただしシンボルの alpha 判定は困難）
+                            if not rules:
+                                try:
+                                    renderer_info = rend.dump() if hasattr(rend, "dump") else (rend.toJson() if hasattr(rend, "toJson") else repr(rend))
+                                except Exception:
+                                    renderer_info = repr(rend)
+                                messages.append(f"[テーマログ] layer order={order} id={lid} name='{lname}' renderer_summary={renderer_info}")
+                                order += 1
+                                continue
+
+                            # ルール毎に alpha を調べ、alpha が 0 のルールは除外してログ作成
+                            for idx, r in enumerate(rules):
+                                try:
+                                    # ルールのフィルタや縮尺はログに載せる（縮尺判定は簡易）
+                                    fexpr = None
+                                    for a in ("filterExpression", "filter", "expression"):
+                                        if hasattr(r, a):
+                                            try:
+                                                val = getattr(r, a)
+                                                fexpr = val() if callable(val) else val
+                                                break
+                                            except Exception:
+                                                fexpr = None
+
+                                    min_scale = None
+                                    max_scale = None
+                                    for mn in ("minimumScale", "scaleMin", "minScale"):
+                                        if hasattr(r, mn):
+                                            try:
+                                                min_scale = getattr(r, mn)()
+                                                break
+                                            except Exception:
+                                                pass
+                                    for mx in ("maximumScale", "scaleMax", "maxScale"):
+                                        if hasattr(r, mx):
+                                            try:
+                                                max_scale = getattr(r, mx)()
+                                                break
+                                            except Exception:
+                                                pass
+
+                                    # シンボル取得（rule.symbol() / rule.symbols() を試す）
+                                    sym = None
+                                    try:
+                                        if hasattr(r, "symbol"):
+                                            try:
+                                                sym = r.symbol()
+                                            except Exception:
+                                                try:
+                                                    sym = getattr(r, "symbol")
+                                                    sym = sym() if callable(sym) else sym
+                                                except Exception:
+                                                    sym = None
+                                        if sym is None and hasattr(r, "symbols"):
+                                            try:
+                                                syms = r.symbols()
+                                                sym = syms[0] if syms else None
+                                            except Exception:
+                                                sym = None
+                                    except Exception:
+                                        sym = None
+
+                                    # まずルールがスタイルとして有効かを判定（無効ならログ除外）
+                                    try:
+                                        if not _is_rule_enabled(r):
+                                            continue
+                                    except Exception:
+                                        pass
+
+                                    # sym から各 symbol layer のアルファを集める
+                                    alpha_vals = []
+                                    if sym is not None:
+                                        try:
+                                            try:
+                                                sls = sym.symbolLayers()
+                                            except Exception:
+                                                sls = [sym]
+                                            for sl in sls:
+                                                try:
+                                                    col = getattr(sl, "color", None)
+                                                    if col and callable(col):
+                                                        qc = col()
+                                                    else:
+                                                        qc = col
+                                                    if qc is not None:
+                                                        try:
+                                                            a_int = qc.alpha()  # 0-255
+                                                            a_f = qc.alphaF()   # 0.0-1.0
+                                                            alpha_vals.append(("int", a_int, "float", a_f))
+                                                        except Exception:
+                                                            alpha_vals.append(("repr", repr(qc)))
+                                                    else:
+                                                        alpha_vals.append(("no_color", repr(sl)))
+                                                except Exception:
+                                                    alpha_vals.append(("err", repr(sl)))
+                                        except Exception:
+                                            alpha_vals = []
+                                    else:
+                                        alpha_vals = []
+
+                                    # 判定: alpha_vals に整数値が含まれるなら全てが 0 か判定
+                                    all_transparent = False
+                                    try:
+                                        int_alphas = [a for t, a, _, _ in alpha_vals if t == "int"] if any(isinstance(x, tuple) and x and x[0] == "int" for x in alpha_vals) else []
+                                    except Exception:
+                                        int_alphas = []
+                                    try:
+                                        if int_alphas:
+                                            all_transparent = all(a == 0 for a in int_alphas)
+                                        else:
+                                            all_transparent = False
+                                    except Exception:
+                                        all_transparent = False
+
+                                    # 全透明ならログ出力から除外（スキップ）
+                                    if all_transparent:
+                                        continue
+
+                                    # ここまで来たらログ出力対象
+                                    messages.append(
+                                        f"[テーマログ][rule] layer order={order} id={lid} name='{lname}' rule_index={idx} filter={fexpr!r} scale=[{min_scale},{max_scale}] alpha={alpha_vals}"
+                                    )
+                                except Exception:
+                                    continue
+
+                            order += 1
+
+                        except Exception:
+                            try:
+                                messages.append(f"[テーマログ] layer order={order} id={lid} name='{lname}' renderer_inspect_failed")
+                                order += 1
+                            except Exception:
+                                pass
+
                     except Exception:
                         continue
             except Exception:
