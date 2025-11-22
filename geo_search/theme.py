@@ -149,29 +149,69 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
             except Exception:
                 orig_visible, orig_visible_groups = set(), []
 
-            # apply theme (this will change node visibility)
-            theme_collection.applyTheme(theme_name, root, model)
-
-            # collect ids visible after apply
-            theme_visible = set()
+            # apply theme temporarily to discover which layers/groups it would make visible
             try:
-                nodes_after = root.findLayers()
+                theme_collection.applyTheme(theme_name, root, model)
+            except Exception:
+                return
+
+            theme_visible = set()
+            theme_visible_groups = []
+            try:
+                nodes_after = list(root.findLayers())
             except Exception:
                 nodes_after = []
+
             for n in nodes_after:
                 try:
-                    if n.isVisible() and n.layer() is not None and hasattr(n.layer(), 'id'):
+                    if n.isVisible() and n.layer() is not None and hasattr(n.layer(), "id"):
                         theme_visible.add(n.layer().id())
                 except Exception:
                     continue
 
-            union_ids = orig_visible.union(theme_visible)
+            try:
+                _, theme_visible_groups = collect_visible_layers_and_groups(root)
+            except Exception:
+                theme_visible_groups = []
 
-            # hide all then restore union set
+            union_ids = orig_visible.union(theme_visible)
+            try:
+                union_groups = list(set(orig_visible_groups) | set(theme_visible_groups))
+            except Exception:
+                union_groups = list(orig_visible_groups)
+
+            # restore original visibility, then enable union of original+theme visible layers
             try:
                 for n in nodes_after:
                     try:
-                        n.setItemVisibilityChecked(False)
+                        layer = n.layer()
+                        if layer is None:
+                            try:
+                                n.setItemVisibilityChecked(False)
+                            except Exception:
+                                pass
+                            continue
+                        lid = None
+                        try:
+                            lid = layer.id()
+                        except Exception:
+                            lid = None
+                        if lid and lid in orig_visible:
+                            cur = n
+                            while cur is not None:
+                                try:
+                                    cur.setItemVisibilityChecked(True)
+                                except Exception:
+                                    pass
+                                try:
+                                    cur = cur.parent()
+                                except Exception:
+                                    break
+                        else:
+                            try:
+                                n.setItemVisibilityChecked(False)
+                            except Exception:
+                                pass
                     except Exception:
                         continue
             except Exception:
@@ -187,7 +227,7 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                         lid = layer.id()
                     except Exception:
                         lid = None
-                    if lid and lid in union_ids:
+                    if lid and lid in theme_visible:
                         cur = n
                         while cur is not None:
                             try:
@@ -201,11 +241,30 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                 except Exception:
                     continue
 
-            # restore any visible groups that had no visible layers
             try:
-                restore_groups_by_paths(root, orig_visible_groups)
+                restore_groups_by_paths(root, union_groups)
             except Exception:
                 pass
+
+            try:
+                from .tools.merge_theme_into_project import apply_theme_symbol_layers_additive
+            except Exception:
+                apply_theme_symbol_layers_additive = None
+            if apply_theme_symbol_layers_additive is not None:
+                try:
+                    only_for = union_ids if not isinstance(union_ids, list) else union_ids
+                    apply_theme_symbol_layers_additive(theme_name, only_for_layer_ids=only_for)
+                    if QgsMessageLog:
+                        try:
+                            QgsMessageLog.logMessage(f"シンボル層の適用を実行しました (mode=additive)", "GEO-search-plugin", 0)
+                        except Exception:
+                            pass
+                except Exception:
+                    if QgsMessageLog:
+                        try:
+                            QgsMessageLog.logMessage(f"シンボル層適用に失敗しましたが処理を継続します (additive): {theme_name}", "GEO-search-plugin", 1)
+                        except Exception:
+                            pass
 
             if QgsMessageLog:
                 try:

@@ -584,10 +584,25 @@ class plugin(object):
             except Exception:
                 pass
 
-            # apply theme via centralized helper (supports additive mode)
+            # apply theme: if additive mode is requested use centralized helper
+            # which implements the union logic; otherwise perform a simple
+            # theme switch using the theme collection API (equivalent to
+            # changing the theme selection in the UI).
             try:
-                from .theme import apply_theme
-                apply_theme(theme_collection, theme_name, root, model, additive=bool(getattr(self, '_theme_additive_mode', False)))
+                if bool(getattr(self, '_theme_additive_mode', False)):
+                    from .theme import apply_theme
+                    apply_theme(theme_collection, theme_name, root, model, additive=True)
+                else:
+                    try:
+                        # prefer applyTheme with root+model when available
+                        try:
+                            theme_collection.applyTheme(theme_name, root, model)
+                        except Exception:
+                            theme_collection.applyTheme(theme_name)
+                    except Exception:
+                        # fallback to centralized helper if direct call fails
+                        from .theme import apply_theme
+                        apply_theme(theme_collection, theme_name, root, model, additive=False)
             finally:
                 # フラグを解除
                 try:
