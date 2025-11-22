@@ -45,15 +45,170 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
         return
 
     if additive:
-        # 簡略化: 追加表示モードでは副作用のある処理を行わず、ログに出力して終了する
+        # 追加表示モード（試験実装）:
+        # - 選択テーマを一時的に適用して、表示されるレイヤとそのシンボロジ情報をログに出力します。
+        # - それ以外の追加表示（和集合）ロジックはまだ実装しません。
+        tmp_name = "__geo_search_tmp__geo_search__"
+        prev_saved = False
         try:
-            if QgsMessageLog:
+            # 現在の状態を保存（可能ならば）
+            prev_theme = None
+            try:
+                if hasattr(theme_collection, "createThemeFromCurrentState"):
+                    try:
+                        prev_theme = theme_collection.createThemeFromCurrentState(root, model)
+                    except Exception:
+                        try:
+                            prev_theme = theme_collection.createThemeFromCurrentState(root)
+                        except Exception:
+                            prev_theme = None
+            except Exception:
+                prev_theme = None
+
+            if prev_theme is not None:
+                # いくつかの API 名を試して一時テーマを登録
+                for add_name in ("insert", "addMapTheme", "addTheme", "add"):
+                    if hasattr(theme_collection, add_name):
+                        try:
+                            getattr(theme_collection, add_name)(tmp_name, prev_theme)
+                            prev_saved = True
+                            break
+                        except Exception:
+                            continue
+
+            # 選択テーマを適用（root/model バージョンを優先）
+            try:
                 try:
-                    QgsMessageLog.logMessage("テーマ追加", "GEO-search-plugin", 0)
+                    theme_collection.applyTheme(theme_name, root, model)
                 except Exception:
-                    pass
-        except Exception:
-            pass
+                    theme_collection.applyTheme(theme_name)
+            except Exception as e:
+                if QgsMessageLog:
+                    try:
+                        QgsMessageLog.logMessage(f"テーマ適用エラー(ログ用): {e}", "GEO-search-plugin", 2)
+                    except Exception:
+                        pass
+                # 適用できなければログ出力できないので戻る
+                return
+
+            # テーマ適用後に表示されているレイヤとシンボロジを列挙してログ出力
+            messages = []
+            try:
+                nodes = []
+                try:
+                    nodes = root.findLayers()
+                except Exception:
+                    nodes = []
+
+                order = 0
+                for n in nodes:
+                    try:
+                        visible = False
+                        try:
+                            visible = bool(n.isVisible())
+                        except Exception:
+                            visible = False
+                        if not visible:
+                            continue
+                        layer = None
+                        try:
+                            layer = n.layer()
+                        except Exception:
+                            layer = None
+                        if layer is None:
+                            continue
+
+                        lid = None
+                        lname = ""
+                        try:
+                            lid = layer.id() if callable(getattr(layer, "id", None)) else getattr(layer, "id", None)
+                        except Exception:
+                            try:
+                                lid = layer.id()
+                            except Exception:
+                                lid = None
+                        try:
+                            lname = layer.name()
+                        except Exception:
+                            try:
+                                lname = getattr(layer, "name", "")
+                            except Exception:
+                                lname = ""
+
+                        # シンボロジ情報を安全に抽出
+                        renderer_info = None
+                        try:
+                            rend = None
+                            try:
+                                rend = layer.renderer() if callable(getattr(layer, "renderer", None)) else getattr(layer, "renderer", None)
+                            except Exception:
+                                try:
+                                    rend = layer.renderer()
+                                except Exception:
+                                    rend = None
+                            if rend is not None:
+                                # 優先順で試す
+                                if hasattr(rend, "dump"):
+                                    try:
+                                        renderer_info = rend.dump()
+                                    except Exception:
+                                        renderer_info = repr(rend)
+                                elif hasattr(rend, "toJson"):
+                                    try:
+                                        renderer_info = rend.toJson()
+                                    except Exception:
+                                        renderer_info = repr(rend)
+                                else:
+                                    renderer_info = repr(rend)
+                        except Exception:
+                            renderer_info = None
+
+                        msg = f"[テーマログ] layer order={order} id={lid} name='{lname}' renderer={renderer_info}"
+                        messages.append(msg)
+                        order += 1
+                    except Exception:
+                        continue
+            except Exception:
+                messages = ["[テーマログ] エラーによりレイヤ取得失敗"]
+
+            # 出力（QgsMessageLog が使えない場合は print）
+            for m in messages:
+                try:
+                    if QgsMessageLog:
+                        try:
+                            QgsMessageLog.logMessage(m, "GEO-search-plugin", 0)
+                        except Exception:
+                            print(m)
+                    else:
+                        print(m)
+                except Exception:
+                    try:
+                        print(m)
+                    except Exception:
+                        pass
+
+        finally:
+            # 元の状態を復元（登録できた一時テーマ名があれば適用してから削除）
+            try:
+                if prev_saved:
+                    try:
+                        try:
+                            theme_collection.applyTheme(tmp_name, root, model)
+                        except Exception:
+                            theme_collection.applyTheme(tmp_name)
+                    except Exception:
+                        pass
+                    # 削除
+                    for rem_name in ("removeMapTheme", "remove", "deleteTheme", "removeTheme"):
+                        if hasattr(theme_collection, rem_name):
+                            try:
+                                getattr(theme_collection, rem_name)(tmp_name)
+                                break
+                            except Exception:
+                                continue
+            except Exception:
+                pass
+        # 追加表示の実装はまだ行わない
         return
 
     # 非 additivemode: 通常適用
