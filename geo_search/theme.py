@@ -45,43 +45,37 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
         return
 
     if additive:
-        # 追加表示モード:
-        # - 既存の表示状態をメモリ内にスナップショット
-        # - 選択テーマを適用
-        # - テーマで可視になったレイヤを既存の可視レイヤに追加（和集合）する
-        # この方式はテーマコレクションのAPI差分や一時テーマ名の競合を避けます。
+        # 追加表示モード（試験実装）:
+        # - 選択テーマを一時的に適用して、表示されるレイヤと
+        #   かつシンボルのアルファが0でないルールのみをログ出力します。
+        # - それ以外の追加表示（和集合）ロジックはまだ実装しません。
+        tmp_name = "__geo_search_tmp__geo_search__"
+        prev_saved = False
         try:
+            # 現在の状態を保存（可能ならば）
+            prev_theme = None
             try:
-                nodes_before = root.findLayers()
-            except Exception:
-                nodes_before = []
-
-            visibility_before = {}
-            for n in nodes_before:
-                try:
-                    layer = n.layer()
-                    if layer is None:
-                        continue
-                    lid = layer.id() if callable(getattr(layer, "id", None)) else getattr(layer, "id", None)
-                    visibility_before[lid] = bool(n.isVisible())
-                except Exception:
-                    continue
-
-            # ログ: スナップショット保存状況
-            try:
-                msg = f"追加表示: メモリに現在の表示状態を保存しました (layers={len(visibility_before)})"
-                if QgsMessageLog:
+                if hasattr(theme_collection, "createThemeFromCurrentState"):
                     try:
-                        QgsMessageLog.logMessage(msg, "GEO-search-plugin", 0)
+                        prev_theme = theme_collection.createThemeFromCurrentState(root, model)
                     except Exception:
-                        print(msg)
-                else:
-                    print(msg)
+                        try:
+                            prev_theme = theme_collection.createThemeFromCurrentState(root)
+                        except Exception:
+                            prev_theme = None
             except Exception:
-                try:
-                    print("追加表示: メモリスナップショットのログ出力に失敗しました")
-                except Exception:
-                    pass
+                prev_theme = None
+
+            if prev_theme is not None:
+                # いくつかの API 名を試して一時テーマを登録
+                for add_name in ("insert", "addMapTheme", "addTheme", "add"):
+                    if hasattr(theme_collection, add_name):
+                        try:
+                            getattr(theme_collection, add_name)(tmp_name, prev_theme)
+                            prev_saved = True
+                            break
+                        except Exception:
+                            continue
 
             # 選択テーマを適用（root/model バージョンを優先）
             try:
@@ -92,104 +86,111 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
             except Exception as e:
                 if QgsMessageLog:
                     try:
-                        QgsMessageLog.logMessage(f"テーマ適用エラー(追加表示): {e}", "GEO-search-plugin", 2)
+                        QgsMessageLog.logMessage(f"テーマ適用エラー(ログ用): {e}", "GEO-search-plugin", 2)
                     except Exception:
                         pass
                 return
-            else:
-                # ログ: テーマ適用成功
+            
+            # 凡例ノード（レイヤパネルの表示チェック）のみで判定するユーティリティ群
+
+            # 選択テーマ適用後、レイヤパネルで可視になっているレイヤ一覧をログ出力
+            messages = []
+            try:
                 try:
-                    msg = f"追加表示: テーマ '{theme_name}' を適用しました"
+                    nodes = root.findLayers()
+                except Exception:
+                    nodes = []
+
+                order = 0
+                for n in nodes:
+                    try:
+                        is_vis = False
+                        try:
+                            is_vis = bool(n.isVisible())
+                        except Exception:
+                            is_vis = False
+                        if not is_vis:
+                            order += 1
+                            continue
+
+                        try:
+                            layer = n.layer()
+                        except Exception:
+                            layer = None
+                        if layer is None:
+                            order += 1
+                            continue
+
+                        try:
+                            lid = layer.id() if callable(getattr(layer, "id", None)) else getattr(layer, "id", None)
+                        except Exception:
+                            try:
+                                lid = layer.id()
+                            except Exception:
+                                lid = None
+                        try:
+                            lname = layer.name()
+                        except Exception:
+                            try:
+                                lname = getattr(layer, "name", "")
+                            except Exception:
+                                lname = ""
+
+                        messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
+                        # そのレイヤに対応する凡例ノード（チェックボックス状態）をログ出力
+                        try:
+                            # モジュール内のユーティリティを使ってレイヤ単位でログ出力
+                            try:
+                                log_layer_legend_state(layer, tag="GEO-search-plugin")
+                            except Exception:
+                                # 何らかの理由でログ出力に失敗しても処理を継続
+                                pass
+                        except Exception:
+                            pass
+
+                        order += 1
+                    except Exception:
+                        continue
+            except Exception:
+                messages = ["[テーマログ] レイヤ一覧の取得に失敗しました"]
+
+            for m in messages:
+                try:
                     if QgsMessageLog:
                         try:
-                            QgsMessageLog.logMessage(msg, "GEO-search-plugin", 0)
+                            QgsMessageLog.logMessage(m, "GEO-search-plugin", 0)
                         except Exception:
-                            print(msg)
+                            print(m)
                     else:
-                        print(msg)
+                        print(m)
                 except Exception:
-                    pass
-            # テーマ適用後に可視になったレイヤを取得
-            try:
-                nodes_after = root.findLayers()
-            except Exception:
-                nodes_after = []
-
-            theme_visible = set()
-            for n in nodes_after:
-                try:
-                    layer = n.layer()
-                    if layer is None:
-                        continue
-                    lid = layer.id() if callable(getattr(layer, "id", None)) else getattr(layer, "id", None)
                     try:
-                        is_vis = bool(n.isVisible())
+                        print(m)
                     except Exception:
-                        is_vis = False
-                    if is_vis:
-                        theme_visible.add(lid)
-                except Exception:
-                    continue
-
-            # ログ: テーマで可視になったレイヤ数
+                        pass
+ 
+        finally:
+            # 元の状態を復元（登録できた一時テーマ名があれば適用してから削除）
             try:
-                msg = f"追加表示: テーマで可視になったレイヤ数={len(theme_visible)}"
-                if QgsMessageLog:
+                if prev_saved:
                     try:
-                        QgsMessageLog.logMessage(msg, "GEO-search-plugin", 0)
-                    except Exception:
-                        print(msg)
-                else:
-                    print(msg)
-            except Exception:
-                pass
-
-            # 既存の可視レイヤとテーマの可視レイヤの和集合を計算
-            existing_visible = {lid for lid, v in visibility_before.items() if v}
-            union_visible = existing_visible | theme_visible
-
-            # ログ: 和集合の件数
-            try:
-                msg = f"追加表示: 和集合で可視にするレイヤ数={len(union_visible)} (existing={len(existing_visible)} theme={len(theme_visible)})"
-                if QgsMessageLog:
-                    try:
-                        QgsMessageLog.logMessage(msg, "GEO-search-plugin", 0)
-                    except Exception:
-                        print(msg)
-                else:
-                    print(msg)
-            except Exception:
-                pass
-
-            # 和集合に含まれるレイヤの表示フラグを True にする（非表示にする操作は行わない）
-            for n in nodes_after:
-                try:
-                    layer = n.layer()
-                    if layer is None:
-                        continue
-                    lid = layer.id() if callable(getattr(layer, "id", None)) else getattr(layer, "id", None)
-                    if lid in union_visible:
                         try:
-                            if hasattr(n, "setItemVisibilityChecked"):
-                                n.setItemVisibilityChecked(True)
-                            elif hasattr(n, "setVisible"):
-                                n.setVisible(True)
-                            elif hasattr(n, "setItemVisibility"):
-                                n.setItemVisibility(True)
+                            theme_collection.applyTheme(tmp_name, root, model)
                         except Exception:
-                            # 個別ノードの設定に失敗しても続行
-                            continue
-                except Exception:
-                    continue
-
-            if QgsMessageLog:
-                try:
-                    QgsMessageLog.logMessage(f"テーマ '{theme_name}' を追加表示モードで適用しました", "GEO-search-plugin", 0)
-                except Exception:
-                    pass
-        except Exception:
-            # 追加表示パスは頑健に例外を握りつぶして元の表示を崩さない
-            pass
+                            theme_collection.applyTheme(tmp_name)
+                    except Exception:
+                        pass
+                    # 削除
+                    for rem_name in ("removeMapTheme", "remove", "deleteTheme", "removeTheme"):
+                        if hasattr(theme_collection, rem_name):
+                            try:
+                                getattr(theme_collection, rem_name)(tmp_name)
+                                break
+                            except Exception:
+                                continue
+            except Exception:
+                pass
+        # 追加表示の実装はまだ行わない
         return
 
     # 非 additivemode: 通常適用
