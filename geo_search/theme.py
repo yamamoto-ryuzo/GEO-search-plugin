@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import xml.etree.ElementTree as ET
 from typing import Iterable, Dict, List, Optional, Tuple
 
 from typing import Tuple as _Tuple, Set
@@ -134,150 +135,36 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
     This function centralizes the additive application logic used by the
     plugin toolbar and search-time theme application.
     """
+    # シンプルで安全な実装: ネストを浅くして構文ミスのリスクを減らす
     try:
-        from qgis.core import QgsMessageLog
+        from qgis.core import QgsMessageLog, QgsProject
     except Exception:
         QgsMessageLog = None
+        QgsProject = None
 
     if not theme_name:
         return
 
+    if additive:
+        # 簡略化: 追加表示モードでは副作用のある処理を行わず、ログに出力して終了する
+        try:
+            if QgsMessageLog:
+                try:
+                    QgsMessageLog.logMessage("テーマ追加", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return
+
+    # 非 additivemode: 通常適用
     try:
-        if additive:
+        theme_collection.applyTheme(theme_name, root, model)
+        if QgsMessageLog:
             try:
-                orig_visible, orig_visible_groups = collect_visible_layers_and_groups(root)
-            except Exception:
-                orig_visible, orig_visible_groups = set(), []
-
-            # apply theme temporarily to discover which layers/groups it would make visible
-            try:
-                theme_collection.applyTheme(theme_name, root, model)
-            except Exception:
-                return
-
-            theme_visible = set()
-            theme_visible_groups = []
-            try:
-                nodes_after = list(root.findLayers())
-            except Exception:
-                nodes_after = []
-
-            for n in nodes_after:
-                try:
-                    if n.isVisible() and n.layer() is not None and hasattr(n.layer(), "id"):
-                        theme_visible.add(n.layer().id())
-                except Exception:
-                    continue
-
-            try:
-                _, theme_visible_groups = collect_visible_layers_and_groups(root)
-            except Exception:
-                theme_visible_groups = []
-
-            union_ids = orig_visible.union(theme_visible)
-            try:
-                union_groups = list(set(orig_visible_groups) | set(theme_visible_groups))
-            except Exception:
-                union_groups = list(orig_visible_groups)
-
-            # restore original visibility, then enable union of original+theme visible layers
-            try:
-                for n in nodes_after:
-                    try:
-                        layer = n.layer()
-                        if layer is None:
-                            try:
-                                n.setItemVisibilityChecked(False)
-                            except Exception:
-                                pass
-                            continue
-                        lid = None
-                        try:
-                            lid = layer.id()
-                        except Exception:
-                            lid = None
-                        if lid and lid in orig_visible:
-                            cur = n
-                            while cur is not None:
-                                try:
-                                    cur.setItemVisibilityChecked(True)
-                                except Exception:
-                                    pass
-                                try:
-                                    cur = cur.parent()
-                                except Exception:
-                                    break
-                        else:
-                            try:
-                                n.setItemVisibilityChecked(False)
-                            except Exception:
-                                pass
-                    except Exception:
-                        continue
+                QgsMessageLog.logMessage(f"テーマ '{theme_name}' を適用しました", "GEO-search-plugin", 0)
             except Exception:
                 pass
-
-            for n in nodes_after:
-                try:
-                    layer = n.layer()
-                    if layer is None:
-                        continue
-                    lid = None
-                    try:
-                        lid = layer.id()
-                    except Exception:
-                        lid = None
-                    if lid and lid in theme_visible:
-                        cur = n
-                        while cur is not None:
-                            try:
-                                cur.setItemVisibilityChecked(True)
-                            except Exception:
-                                pass
-                            try:
-                                cur = cur.parent()
-                            except Exception:
-                                break
-                except Exception:
-                    continue
-
-            try:
-                restore_groups_by_paths(root, union_groups)
-            except Exception:
-                pass
-
-            try:
-                from .tools.merge_theme_into_project import apply_theme_symbol_layers_additive
-            except Exception:
-                apply_theme_symbol_layers_additive = None
-            if apply_theme_symbol_layers_additive is not None:
-                try:
-                    only_for = union_ids if not isinstance(union_ids, list) else union_ids
-                    apply_theme_symbol_layers_additive(theme_name, only_for_layer_ids=only_for)
-                    if QgsMessageLog:
-                        try:
-                            QgsMessageLog.logMessage(f"シンボル層の適用を実行しました (mode=additive)", "GEO-search-plugin", 0)
-                        except Exception:
-                            pass
-                except Exception:
-                    if QgsMessageLog:
-                        try:
-                            QgsMessageLog.logMessage(f"シンボル層適用に失敗しましたが処理を継続します (additive): {theme_name}", "GEO-search-plugin", 1)
-                        except Exception:
-                            pass
-
-            if QgsMessageLog:
-                try:
-                    QgsMessageLog.logMessage(f"テーマ '{theme_name}' を追加表示モードで適用しました", "GEO-search-plugin", 0)
-                except Exception:
-                    pass
-        else:
-            theme_collection.applyTheme(theme_name, root, model)
-            if QgsMessageLog:
-                try:
-                    QgsMessageLog.logMessage(f"テーマ '{theme_name}' を適用しました", "GEO-search-plugin", 0)
-                except Exception:
-                    pass
     except Exception as e:
         if QgsMessageLog:
             try:

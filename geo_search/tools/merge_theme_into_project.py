@@ -100,17 +100,18 @@ def get_theme_xml(theme_name: str) -> Optional[str]:
         root = ET.fromstring(xml)
     except ET.ParseError as e:
         raise RuntimeError(f"Failed to parse project XML: {e}")
-
-    # Find mapTheme elements under any namespace
-    for elem in root.findall('.//mapTheme'):
-        name = elem.get("name")
-        if name == theme_name:
-            return ET.tostring(elem, encoding="unicode")
-    # try lowercase tag fallback (some qgs files may include different casing)
-    for elem in root.findall('.//maptheme'):
-        name = elem.get("name")
-        if name == theme_name:
-            return ET.tostring(elem, encoding="unicode")
+    # Namespace-agnostic search: some QGS XML uses namespaces or different
+    # casing for the <mapTheme> element. Iterate all elements and match by
+    # tag name suffix and name attribute.
+    for elem in root.iter():
+        try:
+            tag = elem.tag
+            if isinstance(tag, str) and tag.lower().endswith('maptheme'):
+                name = elem.get('name')
+                if name == theme_name:
+                    return ET.tostring(elem, encoding='unicode')
+        except Exception:
+            continue
     return None
 
 
@@ -136,12 +137,27 @@ def _extract_visible_layer_ids_from_theme_element(maptheme_elem: ET.Element) -> 
         # common attributes: checked='1' or visible='1'
         checked = node.attrib.get("checked") or node.attrib.get("visible") or node.attrib.get("isChecked")
         if checked is None:
-            # if no explicit checked flag, assume theme lists explicit visible nodes
-            # but to be conservative, skip
+            # if no explicit checked flag, some QGIS versions store only the
+            # layerId entries for visible nodes. Don't skip them outright —
+            # record them as candidates and decide after the loop.
+            # We'll collect candidate ids separately below.
             continue
         if checked.lower() in ("1", "true", "yes"):
             visible_ids.add(lid)
-    return visible_ids
+    # If no explicit visible ids were found but the theme contains layer id
+    # references, treat those layer ids as visible candidates (fallback).
+    if visible_ids:
+        return visible_ids
+    # fallback: collect any layer ids present in the element tree
+    candidate_ids: Set[str] = set()
+    for node in maptheme_elem.iter():
+        for key in ("layerId", "layerid", "id", "layer_id"):
+            if key in node.attrib:
+                lid = node.attrib.get(key)
+                if lid:
+                    candidate_ids.add(lid)
+                break
+    return candidate_ids
 
 
 def get_theme_visible_layer_ids(theme_name: str) -> Set[str]:
@@ -153,9 +169,14 @@ def get_theme_visible_layer_ids(theme_name: str) -> Set[str]:
     except ET.ParseError as e:
         raise RuntimeError(f"Failed to parse project XML: {e}")
 
-    for elem in root.findall('.//mapTheme') + root.findall('.//maptheme'):
-        if elem.get("name") == theme_name:
-            return _extract_visible_layer_ids_from_theme_element(elem)
+    # namespace/case-insensitive search: iterate elements and match tag suffix
+    for elem in root.iter():
+        try:
+            tag = elem.tag
+            if isinstance(tag, str) and tag.lower().endswith('maptheme') and elem.get('name') == theme_name:
+                return _extract_visible_layer_ids_from_theme_element(elem)
+        except Exception:
+            continue
     return set()
 
 

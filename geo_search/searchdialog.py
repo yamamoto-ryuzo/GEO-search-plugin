@@ -884,9 +884,30 @@ class SearchDialog(QDialog):
                     try:
                         project = QgsProject.instance()
                         theme_collection = project.mapThemeCollection()
-                        themes = theme_collection.mapThemes() if theme_collection else []
+                        raw_themes = theme_collection.mapThemes() if theme_collection else []
                     except Exception:
-                        themes = []
+                        raw_themes = []
+
+                    # normalize theme list to names
+                    themes = []
+                    for t in (raw_themes or []):
+                        try:
+                            if isinstance(t, str):
+                                themes.append(t)
+                            else:
+                                if hasattr(t, 'name') and callable(getattr(t, 'name')):
+                                    themes.append(t.name())
+                                elif hasattr(t, 'name'):
+                                    themes.append(getattr(t, 'name'))
+                                elif hasattr(t, 'displayName') and callable(getattr(t, 'displayName')):
+                                    themes.append(t.displayName())
+                                elif hasattr(t, 'displayName'):
+                                    themes.append(getattr(t, 'displayName'))
+                                else:
+                                    themes.append(str(t))
+                        except Exception:
+                            continue
+
                     editor.addItem("")  # 空選択肢
                     for theme in themes:
                         editor.addItem(theme)

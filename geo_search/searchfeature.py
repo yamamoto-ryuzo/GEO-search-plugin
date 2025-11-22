@@ -1105,17 +1105,44 @@ class SearchFeature(object):
             from qgis.core import QgsMessageLog, QgsProject
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
-            themes = theme_collection.mapThemes()
+            # mapThemes() の返り値はQGISバージョンや実装により
+            # - テーマ名の文字列リスト
+            # - テーマオブジェクトのリスト
+            # のいずれかとなり得る。どちらにも対応できるように
+            # 安全に名前一覧を構築する。
+            try:
+                raw_themes = theme_collection.mapThemes()
+            except Exception:
+                raw_themes = []
+
+            theme_names = []
+            for t in (raw_themes or []):
+                try:
+                    if isinstance(t, str):
+                        theme_names.append(t)
+                    else:
+                        # テーマオブジェクトの場合、よく使われるアクセサを試す
+                        if hasattr(t, 'name') and callable(getattr(t, 'name')):
+                            theme_names.append(t.name())
+                        elif hasattr(t, 'name'):
+                            theme_names.append(getattr(t, 'name'))
+                        elif hasattr(t, 'displayName') and callable(getattr(t, 'displayName')):
+                            theme_names.append(t.displayName())
+                        elif hasattr(t, 'displayName'):
+                            theme_names.append(getattr(t, 'displayName'))
+                        else:
+                            theme_names.append(str(t))
+                except Exception:
+                    continue
+
             # JSON設定からテーマ名を取得（なければNone）
             theme_name = self.setting.get("selectTheme")
-            
-            # 適用するテーマ名を決定
+
+            # 適用するテーマ名を決定（安全なメンバー判定）
             apply_theme_name = None
-            if theme_name and theme_name in themes:
-                # 設定で指定されたテーマを使用
+            if theme_name and theme_name in theme_names:
                 apply_theme_name = theme_name
-            elif "検索前" in themes:
-                # 「検索前」テーマを使用
+            elif "検索前" in theme_names:
                 apply_theme_name = "検索前"
             
             # テーマを適用（共通ヘルパーを使用）

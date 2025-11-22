@@ -408,7 +408,30 @@ class plugin(object):
             from qgis.core import QgsProject, QgsMessageLog
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
-            themes = theme_collection.mapThemes()
+            try:
+                raw_themes = theme_collection.mapThemes()
+            except Exception:
+                raw_themes = []
+
+            # normalize to list of names (mapThemes may return strings or theme objects)
+            themes = []
+            for t in (raw_themes or []):
+                try:
+                    if isinstance(t, str):
+                        themes.append(t)
+                    else:
+                        if hasattr(t, 'name') and callable(getattr(t, 'name')):
+                            themes.append(t.name())
+                        elif hasattr(t, 'name'):
+                            themes.append(getattr(t, 'name'))
+                        elif hasattr(t, 'displayName') and callable(getattr(t, 'displayName')):
+                            themes.append(t.displayName())
+                        elif hasattr(t, 'displayName'):
+                            themes.append(getattr(t, 'displayName'))
+                        else:
+                            themes.append(str(t))
+                except Exception:
+                    continue
             # safety: theme_combobox may not exist (initGui not yet run or unloaded)
             if not hasattr(self, 'theme_combobox') or self.theme_combobox is None:
                 # During startup/unload the combobox may legitimately be absent.
@@ -786,21 +809,42 @@ class plugin(object):
 
         if ctx_var is not None:
             input_json_variable = ctx_var
-            # デバッグ出力
-            print(f"Found variable from projectScope: {ctx_var}")
+            # 設定読み込みの診断ログ (QGIS メッセージログに出力)
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"Found variable from projectScope: {ctx_var}", "GEO-search-plugin", 0)
+            except Exception:
+                try:
+                    print(f"Found variable from projectScope: {ctx_var}")
+                except Exception:
+                    pass
         else:
             # fallback: try readEntry / custom property
             try:
                 ok, val = ProjectInstance.readEntry('GEO-search-plugin', 'value')
                 if ok:
                     input_json_variable = val
-                    print(f"Found variable from readEntry: {val}")
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Found variable from readEntry: {val}", "GEO-search-plugin", 0)
+                    except Exception:
+                        try:
+                            print(f"Found variable from readEntry: {val}")
+                        except Exception:
+                            pass
             except Exception:
                 try:
                     pv = ProjectInstance.customProperty('GEO-search-plugin')
                     if pv is not None:
                         input_json_variable = pv
-                        print(f"Found variable from customProperty: {pv}")
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Found variable from customProperty: {pv}", "GEO-search-plugin", 0)
+                        except Exception:
+                            try:
+                                print(f"Found variable from customProperty: {pv}")
+                            except Exception:
+                                pass
                 except Exception:
                     pass
 
@@ -1113,8 +1157,35 @@ class plugin(object):
             # レイヤーツリーを取得
             root = project.layerTreeRoot()
             
-            # 最初に既存の同名テーマを削除（あれば）
-            if theme_name in theme_collection.mapThemes():
+            # 最初に既存の同名テーマを削除（あれば）。mapThemes() の返り値は
+            # 文字列リストかテーマオブジェクトのリストか環境により異なるため
+            # 安全に名前を比較する。
+            try:
+                raw_tm = theme_collection.mapThemes()
+            except Exception:
+                raw_tm = []
+            exists = False
+            for t in (raw_tm or []):
+                try:
+                    if isinstance(t, str):
+                        tname = t
+                    else:
+                        if hasattr(t, 'name') and callable(getattr(t, 'name')):
+                            tname = t.name()
+                        elif hasattr(t, 'name'):
+                            tname = getattr(t, 'name')
+                        elif hasattr(t, 'displayName') and callable(getattr(t, 'displayName')):
+                            tname = t.displayName()
+                        elif hasattr(t, 'displayName'):
+                            tname = getattr(t, 'displayName')
+                        else:
+                            tname = str(t)
+                    if tname == theme_name:
+                        exists = True
+                        break
+                except Exception:
+                    continue
+            if exists:
                 theme_collection.removeMapTheme(theme_name)
             
             # レイヤーツリーモデルを取得してテーマを作成
