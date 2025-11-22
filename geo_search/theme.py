@@ -137,6 +137,52 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                                 lname = ""
 
                         messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
+                        # そのレイヤに対応する凡例ノードを取得し、チェックされているノードのみログ出力
+                        # ルールベースレンダラーが使われている場合、各ルールの label と active() をログ出力
+                        try:
+                            # renderer を安全に取得する
+                            try:
+                                renderer = layer.renderer()
+                            except Exception:
+                                renderer = None
+
+                            if renderer is not None:
+                                try:
+                                    from qgis.core import QgsRuleBasedRenderer
+                                    if isinstance(renderer, QgsRuleBasedRenderer):
+                                        try:
+                                            root_rule = renderer.rootRule()
+
+                                            def _collect_rules(rule):
+                                                out = []
+                                                for ch in rule.children():
+                                                    out.append(ch)
+                                                    out.extend(_collect_rules(ch))
+                                                return out
+
+                                            for r in _collect_rules(root_rule):
+                                                try:
+                                                    lbl = r.label() or "(no label)"
+                                                except Exception:
+                                                    lbl = "(label error)"
+                                                try:
+                                                    active = bool(r.active())
+                                                except Exception:
+                                                    active = False
+                                                # 非アクティブなルール(active=False)は出力しない
+                                                if active:
+                                                    messages.append(
+                                                        f"[テーマログ][rule] layer={lname} rule_label={lbl}"
+                                                    )
+                                        except Exception:
+                                            # renderer introspection failed; ignore
+                                            pass
+                                except Exception:
+                                    # qgis.core import may fail outside QGIS
+                                    pass
+                        except Exception:
+                            pass
+
                         order += 1
                     except Exception:
                         continue
