@@ -41,6 +41,88 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
         QgsMessageLog = None
         QgsProject = None
 
+    # ログ出力用ユーティリティ（QGIS の QgsMessageLog を優先、なければ print）
+    def _log(msg: str, level: int = 0) -> None:
+        try:
+            if QgsMessageLog is not None:
+                try:
+                    QgsMessageLog.logMessage(msg, "GEO-search-plugin", level)
+                    return
+                except Exception:
+                    pass
+            print(msg)
+        except Exception:
+            try:
+                print(msg)
+            except Exception:
+                pass
+
+    def _short(s: object, maxlen: int = 200) -> str:
+        try:
+            text = str(s)
+        except Exception:
+            try:
+                text = repr(s)
+            except Exception:
+                return "<unrepresentable>"
+        if len(text) <= maxlen:
+            return text
+        return text[: maxlen - 3] + "..."
+
+    def _summarize_theme(t) -> str:
+        parts = []
+        try:
+            parts.append(f"type={type(t).__name__}")
+        except Exception:
+            parts.append("type=<unknown>")
+        # try to get a name
+        try:
+            name = None
+            if hasattr(t, "name"):
+                try:
+                    name = t.name() if callable(getattr(t, "name", None)) else getattr(t, "name", None)
+                except Exception:
+                    name = None
+            if not name and hasattr(t, "title"):
+                try:
+                    name = t.title() if callable(getattr(t, "title", None)) else getattr(t, "title", None)
+                except Exception:
+                    name = None
+            if name:
+                parts.append(f"name={_short(name,80)}")
+        except Exception:
+            pass
+        # try to get layer count
+        try:
+            layer_count = None
+            for attr in ("layerIds", "layers", "layer_count", "layerCount", "layersCount"):
+                try:
+                    val = getattr(t, attr, None)
+                    if val is None:
+                        continue
+                    maybe = val() if callable(val) else val
+                    if isinstance(maybe, (list, tuple, set)):
+                        layer_count = len(maybe)
+                        break
+                    if isinstance(maybe, int):
+                        layer_count = maybe
+                        break
+                except Exception:
+                    continue
+            if layer_count is not None:
+                parts.append(f"layers={layer_count}")
+        except Exception:
+            pass
+        # short repr
+        try:
+            parts.append(f"repr={_short(getattr(t, 'toString', getattr(t, 'toXml', getattr(t, '__repr__', None))) or t, 120)}")
+        except Exception:
+            try:
+                parts.append(_short(repr(t), 120))
+            except Exception:
+                pass
+        return ", ".join(parts)
+
     if not theme_name:
         return
 
@@ -53,8 +135,10 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
         prev_saved = False
         try:
             # 現在の状態を保存（可能ならば）
+            # ここでは一時テーマとしてプロジェクトのテーマコレクションに登録して復元を行う。
             prev_theme = None
             try:
+                # テーマオブジェクトを作成（API の違いに対応）
                 if hasattr(theme_collection, "createThemeFromCurrentState"):
                     try:
                         prev_theme = theme_collection.createThemeFromCurrentState(root, model)
@@ -63,19 +147,56 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                             prev_theme = theme_collection.createThemeFromCurrentState(root)
                         except Exception:
                             prev_theme = None
+                else:
+                    # クラスメソッド経由の生成を試す
+                    try:
+                        from qgis.core import QgsMapThemeCollection
+                        try:
+                            prev_theme = QgsMapThemeCollection.createThemeFromCurrentState(root, model)
+                        except Exception:
+                            prev_theme = QgsMapThemeCollection.createThemeFromCurrentState(root)
+                    except Exception:
+                        prev_theme = None
             except Exception:
                 prev_theme = None
 
+            # 作成できたらコレクションへ保存（既存なら更新、無ければ挿入）
             if prev_theme is not None:
-                # いくつかの API 名を試して一時テーマを登録
-                for add_name in ("insert", "addMapTheme", "addTheme", "add"):
-                    if hasattr(theme_collection, add_name):
+                saved = False
+                try:
+                    # 既存の API 名を試す
+                    if hasattr(theme_collection, "hasMapTheme") and hasattr(theme_collection, "update"):
                         try:
-                            getattr(theme_collection, add_name)(tmp_name, prev_theme)
-                            prev_saved = True
-                            break
+                            if theme_collection.hasMapTheme(tmp_name):
+                                theme_collection.update(tmp_name, prev_theme)
+                                saved = True
+                            else:
+                                theme_collection.insert(tmp_name, prev_theme)
+                                saved = True
                         except Exception:
-                            continue
+                            saved = False
+                    else:
+                        for add_name in ("insert", "addMapTheme", "addTheme", "add"):
+                            if hasattr(theme_collection, add_name):
+                                try:
+                                    getattr(theme_collection, add_name)(tmp_name, prev_theme)
+                                    saved = True
+                                    break
+                                except Exception:
+                                    continue
+                except Exception:
+                    saved = False
+
+                if saved:
+                    prev_saved = True
+                    try:
+                        summary = _summarize_theme(prev_theme)
+                    except Exception:
+                        summary = "<unable to summarize>"
+                    try:
+                        _log(f"[テーマログ] prev_theme をコレクションに保存しました: {summary}", 0)
+                    except Exception:
+                        pass
 
             # 選択テーマを適用（root/model バージョンを優先）
             try:
@@ -170,26 +291,36 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                         pass
  
         finally:
-            # 元の状態を復元（登録できた一時テーマ名があれば適用してから削除）
+            # 元の状態を復元: コレクションに保存した一時テーマ名で適用して削除する
             try:
                 if prev_saved:
                     try:
+                        _log("[テーマログ] 一時テーマからの復元を試みます", 0)
                         try:
                             theme_collection.applyTheme(tmp_name, root, model)
                         except Exception:
                             theme_collection.applyTheme(tmp_name)
-                    except Exception:
-                        pass
+                        _log("[テーマログ] 一時テーマを適用しました", 0)
+                    except Exception as e:
+                        _log(f"[テーマログ] 一時テーマの適用に失敗しました: {_short(e,200)}", 2)
+
                     # 削除
-                    for rem_name in ("removeMapTheme", "remove", "deleteTheme", "removeTheme"):
-                        if hasattr(theme_collection, rem_name):
-                            try:
-                                getattr(theme_collection, rem_name)(tmp_name)
-                                break
-                            except Exception:
-                                continue
+                    try:
+                        for rem_name in ("removeMapTheme", "remove", "deleteTheme", "removeTheme"):
+                            if hasattr(theme_collection, rem_name):
+                                try:
+                                    getattr(theme_collection, rem_name)(tmp_name)
+                                    _log("[テーマログ] 一時テーマを削除しました", 0)
+                                    break
+                                except Exception:
+                                    continue
+                    except Exception:
+                        _log("[テーマログ] 一時テーマの削除で例外が発生しました", 2)
             except Exception:
-                pass
+                try:
+                    _log("[テーマログ] prev_theme 復元の最外部で例外が発生しました", 2)
+                except Exception:
+                    pass
         # 追加表示の実装はまだ行わない
         return
 
