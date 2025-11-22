@@ -49,6 +49,12 @@ class plugin(object):
         # this flag avoids noisy warnings when widgets like theme_combobox
         # are not yet created.
         self._gui_ready = False
+        # guard to avoid connecting theme collection signals multiple times
+        self._theme_signals_connected = False
+        # last time we logged a missing theme_combobox warning (seconds)
+        self._last_missing_combobox_warning = 0.0
+        # diagnostic call counter for update_theme_combobox
+        self._theme_update_call_count = 0
         self._init_language()
         self.current_feature = None
         self._current_group_widget = None
@@ -78,6 +84,11 @@ class plugin(object):
 
     def initGui(self):
         # プラグイン開始時に動作
+        # mark GUI not-ready at start to avoid spurious warnings during init
+        try:
+            self._gui_ready = False
+        except Exception:
+            pass
         # メッセージ表示
         # QMessageBox.information(None, "iniGui", "Gui構築", QMessageBox.Yes)
 
@@ -196,21 +207,51 @@ class plugin(object):
             # テーマコレクションの変更を検知（重要：テーマが追加/削除された時に自動更新）
             project = QgsProject.instance()
             theme_collection = project.mapThemeCollection()
-            # mapThemesChangedシグナルがQGISのバージョンにより異なる可能性があるため複数の接続方法を試みる
+            # Connect theme collection signals only once to avoid duplicate handlers
             try:
-                theme_collection.mapThemesChanged.connect(self.update_theme_combobox)
-            except:
-                # 古いバージョン向けの代替手段
-                try:
-                    theme_collection.changed.connect(self.update_theme_combobox)
-                except:
-                    pass
+                if not getattr(self, '_theme_signals_connected', False):
+                    try:
+                        # connect to wrapper handlers so we can log which signal fired
+                        try:
+                            theme_collection.mapThemesChanged.connect(self._on_map_themes_changed)
+                        except Exception:
+                            # fallback to direct connection if wrapper can't be connected
+                            theme_collection.mapThemesChanged.connect(self.update_theme_combobox)
+                    except Exception:
+                        # 古いバージョン向けの代替手段
+                        try:
+                            try:
+                                theme_collection.changed.connect(self._on_theme_collection_changed)
+                            except Exception:
+                                theme_collection.changed.connect(self.update_theme_combobox)
+                        except Exception:
+                            pass
+                    try:
+                        self._theme_signals_connected = True
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"theme signals connected (instance={id(self)})", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"theme signals already connected (instance={id(self)})", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog
                 QgsMessageLog.logMessage(f"テーマ監視エラー: {str(e)}", "GEO-search-plugin", 2)
             except:
                 pass
+
+        # GUI is now ready for warnings/updates
+        try:
+            self._gui_ready = True
+        except Exception:
+            pass
 
     def _safe_current_text(self, widget):
         """Safely return currentText() from a combo-like widget or empty string.
@@ -341,6 +382,21 @@ class plugin(object):
     def update_theme_combobox(self):
         """マップテーマのコンボボックスを更新する"""
         try:
+            # diagnostic: log entry with instance and flags
+            try:
+                from qgis.core import QgsMessageLog
+                try:
+                    # increment per-instance call counter for diagnostics
+                    self._theme_update_call_count = int(getattr(self, '_theme_update_call_count', 0)) + 1
+                except Exception:
+                    pass
+                QgsMessageLog.logMessage(
+                    f"update_theme_combobox called (instance={id(self)} call={getattr(self, '_theme_update_call_count', 0)} _gui_ready={getattr(self, '_gui_ready', False)} _suppress={getattr(self, '_suppress_theme_update', False)})",
+                    "GEO-search-plugin",
+                    0,
+                )
+            except Exception:
+                pass
             # apply_selected_theme 実行中は外部シグナルによる自動更新を抑止する
             if getattr(self, '_suppress_theme_update', False):
                 try:
@@ -355,8 +411,37 @@ class plugin(object):
             themes = theme_collection.mapThemes()
             # safety: theme_combobox may not exist (initGui not yet run or unloaded)
             if not hasattr(self, 'theme_combobox') or self.theme_combobox is None:
+                # During startup/unload the combobox may legitimately be absent.
+                # Only emit a warning when GUI is ready and updates are not being
+                # deliberately suppressed (e.g. during theme apply). This avoids
+                # plugin init/unload or while applying a theme.
                 try:
-                    QgsMessageLog.logMessage("update_theme_combobox: theme_combobox is not available", "GEO-search-plugin", 1)
+                    gui_ready = bool(getattr(self, '_gui_ready', False))
+                    suppressed = bool(getattr(self, '_suppress_theme_update', False))
+                    if gui_ready and not suppressed:
+                        # rate-limit duplicate warnings to avoid log spam when multiple
+                        # map-theme related signals fire in quick succession.
+                        try:
+                            import time
+                            now = time.time()
+                            last = float(getattr(self, '_last_missing_combobox_warning', 0.0))
+                            # only log once per second per instance
+                            if now - last < 1.0:
+                                return
+                            try:
+                                self._last_missing_combobox_warning = now
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+                        import traceback
+                        stack = ''.join(traceback.format_stack(limit=6))
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(
+                            f"update_theme_combobox: theme_combobox is not available (instance={id(self)} _gui_ready={gui_ready} _suppress={suppressed}). stack:\n{stack}",
+                            "GEO-search-plugin",
+                            1,
+                        )
                 except Exception:
                     pass
                 return
@@ -490,7 +575,12 @@ class plugin(object):
             # update_theme_combobox が走ると UI 候補が書き換わる可能性があるため
             # 一時的に更新を抑止するフラグを立てる
             try:
-                self._suppress_theme_update = True
+                    self._suppress_theme_update = True
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"apply_selected_theme: set _suppress_theme_update=True (instance={id(self)})", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -508,15 +598,91 @@ class plugin(object):
                     self._applying_theme = False
                 except Exception:
                     pass
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"apply_selected_theme: cleared _suppress_theme_update/_applying_theme (instance={id(self)})", "GEO-search-plugin", 0)
+                except Exception:
+                    pass
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog
                 QgsMessageLog.logMessage(f"テーマ適用エラー: {str(e)}", "GEO-search-plugin", 2)
             except Exception:
                 pass
+
+    def _on_map_themes_changed(self, *args, **kwargs):
+        """Wrapper for mapThemesChanged signal: log and delegate."""
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"mapThemesChanged signal received (instance={id(self)})", "GEO-search-plugin", 0)
+        except Exception:
+            pass
+        try:
+            self.update_theme_combobox()
+        except Exception:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("_on_map_themes_changed: update failed", "GEO-search-plugin", 2)
+            except Exception:
+                pass
+
+    def _on_theme_collection_changed(self, *args, **kwargs):
+        """Wrapper for legacy theme collection 'changed' signal."""
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"themeCollection.changed signal received (instance={id(self)})", "GEO-search-plugin", 0)
+        except Exception:
+            pass
+        try:
+            self.update_theme_combobox()
+        except Exception:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("_on_theme_collection_changed: update failed", "GEO-search-plugin", 2)
+            except Exception:
+                pass
     
     def unload(self):
         # プラグイン終了時に動作（例外処理を追加）
+        # mark GUI not-ready to suppress warnings while widgets are being removed
+        try:
+            self._gui_ready = False
+        except Exception:
+            pass
+        # disconnect theme collection signals if we connected them
+        try:
+            if getattr(self, '_theme_signals_connected', False):
+                try:
+                    project = QgsProject.instance()
+                    theme_collection = project.mapThemeCollection()
+                    try:
+                        try:
+                            theme_collection.mapThemesChanged.disconnect(self._on_map_themes_changed)
+                        except Exception:
+                            try:
+                                theme_collection.mapThemesChanged.disconnect(self.update_theme_combobox)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    try:
+                        try:
+                            theme_collection.changed.disconnect(self._on_theme_collection_changed)
+                        except Exception:
+                            try:
+                                theme_collection.changed.disconnect(self.update_theme_combobox)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                try:
+                    self._theme_signals_connected = False
+                except Exception:
+                    pass
+        except Exception:
+            pass
         try:
             self.iface.removeToolBarIcon(self.action)
             self.iface.removePluginMenu("地図検索", self.action)
