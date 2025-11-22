@@ -96,23 +96,97 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
             # 有効なルールのみログ対象とします。シンボルの alpha 情報は
             # 参考として収集します（追加の除外条件として維持）。
             messages = []
-            # ルールがスタイルとして有効かを判定するユーティリティ
-            def _is_rule_enabled(rule):
+            # 凡例ノード（レイヤパネルの表示チェック）のみで判定するユーティリティ群
+            def _try_attr(obj, *names):
                 try:
-                    for name in ("isEnabled", "enabled", "isActive", "active", "isVisible"):
-                        if hasattr(rule, name):
+                    for n in names:
+                        if hasattr(obj, n):
                             try:
-                                val = getattr(rule, name)
-                                v = val() if callable(val) else val
-                                if v is False:
-                                    return False
-                                if v is True:
-                                    return True
+                                v = getattr(obj, n)
+                                return v() if callable(v) else v
                             except Exception:
                                 continue
-                    return True
                 except Exception:
-                    return True
+                    pass
+                return None
+
+            def _legend_nodes_for_layer(layer, model):
+                try:
+                    for mname in ("layerLegendNodes", "legendNodesForLayer", "findLegendNodes",
+                                  "legendNodeForLayer", "layerLegendNode", "legendNodes"):
+                        if hasattr(model, mname):
+                            try:
+                                res = getattr(model, mname)(layer)
+                                if res:
+                                    return res
+                            except Exception:
+                                try:
+                                    res = getattr(model, mname)(_try_attr(layer, "id", "layerId", "name"))
+                                    if res:
+                                        return res
+                                except Exception:
+                                    continue
+                except Exception:
+                    pass
+                return None
+
+            def _legend_node_label(node):
+                return _try_attr(node, "name", "label", "text", "caption", "title", "displayName")
+
+            def _is_legend_node_checked(node):
+                v = _try_attr(node, "isChecked", "checked", "isVisible", "visible", "isEnabled", "enabled")
+                if isinstance(v, bool):
+                    return v
+                if v in (0, 1):
+                    return bool(v)
+                return None
+
+            def _rule_label(rule):
+                for n in ("label", "name", "description", "ruleLabel", "title", "caption"):
+                    val = _try_attr(rule, n)
+                    if val:
+                        return str(val)
+                return None
+
+            def _is_rule_displayed_by_legend(rule, layer, model):
+                try:
+                    if model is None:
+                        return False
+                    legend_nodes = _legend_nodes_for_layer(layer, model)
+                    if not legend_nodes:
+                        return False
+                    if not isinstance(legend_nodes, (list, tuple)):
+                        try:
+                            legend_nodes = [legend_nodes]
+                        except Exception:
+                            legend_nodes = list(legend_nodes) if hasattr(legend_nodes, '__iter__') else [legend_nodes]
+
+                    rlabel = _rule_label(rule)
+                    for ln in legend_nodes:
+                        try:
+                            ln_label = _legend_node_label(ln)
+                            for attr in ("rule", "associatedRule", "ruleRef", "ruleId"):
+                                if hasattr(ln, attr):
+                                    try:
+                                        ln_rule = getattr(ln, attr)
+                                        ln_rule = ln_rule() if callable(ln_rule) else ln_rule
+                                        if ln_rule is rule or str(ln_rule) == str(rlabel):
+                                            checked = _is_legend_node_checked(ln)
+                                            return bool(checked) if checked is not None else False
+                                    except Exception:
+                                        pass
+                            if rlabel is not None and ln_label is not None:
+                                try:
+                                    if str(rlabel).strip().lower() == str(ln_label).strip().lower():
+                                        checked = _is_legend_node_checked(ln)
+                                        return bool(checked) if checked is not None else False
+                                except Exception:
+                                    pass
+                        except Exception:
+                            continue
+                    return False
+                except Exception:
+                    return False
             try:
                 try:
                     nodes = root.findLayers()
@@ -249,12 +323,12 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                                     except Exception:
                                         sym = None
 
-                                    # まずルールがスタイルとして有効かを判定（無効ならログ除外）
+                                    # まず凡例ノードのチェック状態のみで判定（未チェックならログ除外）
                                     try:
-                                        if not _is_rule_enabled(r):
+                                        if not _is_rule_displayed_by_legend(r, layer, model):
                                             continue
                                     except Exception:
-                                        pass
+                                        continue
 
                                     # sym から各 symbol layer のアルファを集める
                                     alpha_vals = []
