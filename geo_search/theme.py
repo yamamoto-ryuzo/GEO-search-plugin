@@ -137,49 +137,14 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                                 lname = ""
 
                         messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
-                        # そのレイヤに対応する凡例ノードを取得し、チェックされているノードのみログ出力
-                        # ルールベースレンダラーが使われている場合、各ルールの label と active() をログ出力
+                        # そのレイヤに対応する凡例ノード（チェックボックス状態）をログ出力
                         try:
-                            # renderer を安全に取得する
+                            # モジュール内のユーティリティを使ってレイヤ単位でログ出力
                             try:
-                                renderer = layer.renderer()
+                                log_layer_legend_state(layer, tag="GEO-search-plugin")
                             except Exception:
-                                renderer = None
-
-                            if renderer is not None:
-                                try:
-                                    from qgis.core import QgsRuleBasedRenderer
-                                    if isinstance(renderer, QgsRuleBasedRenderer):
-                                        try:
-                                            root_rule = renderer.rootRule()
-
-                                            def _collect_rules(rule):
-                                                out = []
-                                                for ch in rule.children():
-                                                    out.append(ch)
-                                                    out.extend(_collect_rules(ch))
-                                                return out
-
-                                            for r in _collect_rules(root_rule):
-                                                try:
-                                                    lbl = r.label() or "(no label)"
-                                                except Exception:
-                                                    lbl = "(label error)"
-                                                try:
-                                                    active = bool(r.active())
-                                                except Exception:
-                                                    active = False
-                                                # 非アクティブなルール(active=False)は出力しない
-                                                if active:
-                                                    messages.append(
-                                                        f"[テーマログ][rule] layer={lname} rule_label={lbl}"
-                                                    )
-                                        except Exception:
-                                            # renderer introspection failed; ignore
-                                            pass
-                                except Exception:
-                                    # qgis.core import may fail outside QGIS
-                                    pass
+                                # 何らかの理由でログ出力に失敗しても処理を継続
+                                pass
                         except Exception:
                             pass
 
@@ -293,10 +258,288 @@ def group_themes(theme_names: Iterable[str]) -> Dict[Optional[str], List[str]]:
     return groups
 
 
+def get_layer_legend_state(layer):
+    """レイヤの凡例（レジェンド）チェック状態を取得して構造化して返す。
+
+    戻り値の例:
+    {
+        'layer_id': '...',
+        'layer_name': '...',
+        'renderer': 'QgsRuleBasedRenderer',
+        'items': [
+            {'index': 0, 'type': 'rule', 'label': 'foo', 'visible': True},
+            ...
+        ]
+    }
+
+    この関数は QGIS の実行環境外でも安全にインポートできるように設計されています。
+    レンダラー固有の API が存在しない場合は文字列クラス名を使って判定を試みます。
+    """
+    result = {
+        'layer_id': None,
+        'layer_name': None,
+        'renderer': None,
+        'items': [],
+    }
+
+    if layer is None:
+        return result
+
+    try:
+        result['layer_id'] = layer.id() if callable(getattr(layer, 'id', None)) else getattr(layer, 'id', None)
+    except Exception:
+        result['layer_id'] = None
+    try:
+        result['layer_name'] = layer.name()
+    except Exception:
+        result['layer_name'] = getattr(layer, 'name', None) or None
+
+    try:
+        renderer = layer.renderer()
+    except Exception:
+        renderer = None
+
+    renderer_class_name = type(renderer).__name__ if renderer is not None else None
+    result['renderer'] = renderer_class_name
+
+    def _call_bool_methods(obj, method_names):
+        for m in method_names:
+            try:
+                meth = getattr(obj, m, None)
+                if callable(meth):
+                    return bool(meth())
+            except Exception:
+                continue
+        # 一部オブジェクトは属性として True/False を持つ場合もある
+        for m in method_names:
+            try:
+                val = getattr(obj, m, None)
+                if isinstance(val, bool):
+                    return val
+            except Exception:
+                continue
+        return None
+
+    # レンダラーが無ければ終了
+    if renderer is None:
+        return result
+
+    try:
+        from qgis.core import (
+            QgsCategorizedSymbolRenderer,
+            QgsGraduatedSymbolRenderer,
+            QgsRuleBasedRenderer,
+            QgsSingleSymbolRenderer,
+        )
+    except Exception:
+        QgsCategorizedSymbolRenderer = None
+        QgsGraduatedSymbolRenderer = None
+        QgsRuleBasedRenderer = None
+        QgsSingleSymbolRenderer = None
+
+    # カテゴリレンダラー
+    try:
+        if (QgsCategorizedSymbolRenderer is not None and isinstance(renderer, QgsCategorizedSymbolRenderer)) or (
+            QgsCategorizedSymbolRenderer is None and renderer_class_name == 'QgsCategorizedSymbolRenderer'
+        ):
+            items = []
+            try:
+                categories = renderer.categories()
+            except Exception:
+                categories = []
+            for i, cat in enumerate(categories):
+                try:
+                    label = cat.label()
+                except Exception:
+                    label = getattr(cat, 'label', None)
+                visible = _call_bool_methods(cat, ('renderState', 'isVisible', 'active'))
+                items.append({'index': i, 'type': 'category', 'label': label, 'visible': visible})
+            result['items'] = items
+            return result
+    except Exception:
+        pass
+
+    # 段階別レンダラー
+    try:
+        if (QgsGraduatedSymbolRenderer is not None and isinstance(renderer, QgsGraduatedSymbolRenderer)) or (
+            QgsGraduatedSymbolRenderer is None and renderer_class_name == 'QgsGraduatedSymbolRenderer'
+        ):
+            items = []
+            try:
+                ranges = renderer.ranges()
+            except Exception:
+                ranges = []
+            for i, r in enumerate(ranges):
+                try:
+                    label = r.label()
+                except Exception:
+                    label = getattr(r, 'label', None)
+                visible = _call_bool_methods(r, ('renderState', 'isVisible', 'active'))
+                items.append({'index': i, 'type': 'range', 'label': label, 'visible': visible})
+            result['items'] = items
+            return result
+    except Exception:
+        pass
+
+    # ルールベースレンダラー
+    try:
+        if (QgsRuleBasedRenderer is not None and isinstance(renderer, QgsRuleBasedRenderer)) or (
+            QgsRuleBasedRenderer is None and renderer_class_name == 'QgsRuleBasedRenderer'
+        ):
+            items = []
+            try:
+                root_rule = renderer.rootRule()
+
+                def _collect_rules(rule, out=None):
+                    if out is None:
+                        out = []
+                    for ch in rule.children():
+                        out.append(ch)
+                        _collect_rules(ch, out)
+                    return out
+
+                all_rules = _collect_rules(root_rule)
+            except Exception:
+                all_rules = []
+
+            # ラベルのあるルールを凡例アイテムと見なす
+            legend_rules = [r for r in all_rules if (getattr(r, 'label', None) and (r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)))]
+            for i, r in enumerate(legend_rules):
+                try:
+                    label = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
+                except Exception:
+                    label = None
+                visible = _call_bool_methods(r, ('active', 'renderState', 'isVisible'))
+                items.append({'index': i, 'type': 'rule', 'label': label, 'visible': visible})
+            result['items'] = items
+            return result
+    except Exception:
+        pass
+
+    # 単一シンボルレンダラー
+    try:
+        if (QgsSingleSymbolRenderer is not None and isinstance(renderer, QgsSingleSymbolRenderer)) or (
+            QgsSingleSymbolRenderer is None and renderer_class_name == 'QgsSingleSymbolRenderer'
+        ):
+            # 単一シンボルは凡例項目の概念が薄いが、表示状態を返す
+            visible = True
+            # レイヤの表示自体を確認できる場合は優先して使う
+            try:
+                from qgis.utils import iface
+            except Exception:
+                iface = None
+            items = [{'index': 0, 'type': 'single', 'label': result['layer_name'] or '(single)', 'visible': visible}]
+            result['items'] = items
+            return result
+    except Exception:
+        pass
+
+    # 未サポートのレンダラー: 空の items を返す
+    return result
+
+
+def log_layer_legend_state(layer, tag: str = "GEO-search-plugin"):
+    """`get_layer_legend_state` の結果をログ出力する。
+
+    - QGIS 実行環境であれば `QgsMessageLog.logMessage` を使う。
+    - それ以外は `print` による出力を行う。
+    """
+    try:
+        state = get_layer_legend_state(layer)
+    except Exception:
+        state = None
+
+    messages = []
+    if not state:
+        messages.append("[凡例状態] レイヤ情報が取得できませんでした")
+    else:
+        lid = state.get('layer_id')
+        lname = state.get('layer_name')
+        renderer = state.get('renderer')
+        messages.append(f"[凡例状態][layer] id={lid} name='{lname}' renderer={renderer}")
+        items = state.get('items', []) or []
+        # 可視な凡例項目（visible is True）のみをログ出力
+        visible_items = [it for it in items if it.get('visible') is True]
+        if not visible_items:
+            messages.append("[凡例状態] 可視な凡例項目はありません")
+        else:
+            for it in visible_items:
+                idx = it.get('index')
+                itype = it.get('type')
+                label = it.get('label')
+                # 表示フラグは True に限定しているため常に True
+                messages.append(f"[凡例状態][item] index={idx} type={itype} label='{label}' visible=True")
+
+    # Try to use QgsMessageLog if available
+    try:
+        from qgis.core import QgsMessageLog
+    except Exception:
+        QgsMessageLog = None
+
+    for m in messages:
+        try:
+            if QgsMessageLog is not None:
+                try:
+                    QgsMessageLog.logMessage(m, tag, 0)
+                except Exception:
+                    print(m)
+            else:
+                print(m)
+        except Exception:
+            try:
+                print(m)
+            except Exception:
+                pass
+
+
+def log_layer_legend_state_by_name(layer_name: str, project=None, tag: str = "GEO-search-plugin"):
+    """レイヤ名からレイヤを検索して凡例状態をログ出力するユーティリティ。
+
+    `project` を指定しない場合は `QgsProject.instance()` を使用します。
+    """
+    try:
+        from qgis.core import QgsProject
+    except Exception:
+        QgsProject = None
+
+    if project is None and QgsProject is not None:
+        try:
+            project = QgsProject.instance()
+        except Exception:
+            project = None
+
+    layers = []
+    if project is not None:
+        try:
+            layers = project.mapLayersByName(layer_name)
+        except Exception:
+            layers = []
+
+    if not layers:
+        msg = f"[凡例状態] レイヤ '{layer_name}' が見つかりません"
+        try:
+            from qgis.core import QgsMessageLog
+        except Exception:
+            QgsMessageLog = None
+        if QgsMessageLog is not None:
+            try:
+                QgsMessageLog.logMessage(msg, tag, 1)
+            except Exception:
+                print(msg)
+        else:
+            print(msg)
+        return
+
+    # 最初のレイヤを使う
+    log_layer_legend_state(layers[0], tag=tag)
+
+
 __all__ = [
     "apply_theme",
     "_get_theme_brackets",
     "parse_theme_group",
     "group_themes",
-    
+    "get_layer_legend_state",
+    "log_layer_legend_state",
+    "log_layer_legend_state_by_name",
 ]
