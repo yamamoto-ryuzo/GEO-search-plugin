@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 import re
 from typing import Iterable, Dict, List, Optional, Tuple
 
@@ -262,6 +263,35 @@ def restore_and_remove_temp_theme(
         return False
 
 
+def remove_temp_theme(theme_collection, tmp_name: str, log_func=None):
+    """Remove a temporary theme by name from the collection without applying it.
+
+    Returns True if removal succeeded, False otherwise.
+    """
+    if not tmp_name:
+        return False
+    try:
+        for rem_name in ("removeMapTheme", "remove", "deleteTheme", "removeTheme"):
+            if hasattr(theme_collection, rem_name):
+                try:
+                    getattr(theme_collection, rem_name)(tmp_name)
+                    if log_func is not None:
+                        try:
+                            log_func("[テーマログ] 一時テーマを削除しました", 0)
+                        except Exception:
+                            pass
+                    return True
+                except Exception:
+                    continue
+    except Exception:
+        try:
+            if log_func is not None:
+                log_func("[テーマログ] 一時テーマの削除で例外が発生しました", 2)
+        except Exception:
+            pass
+    return False
+
+
 def apply_theme(theme_collection, theme_name: str, root, model, additive: bool = False):
     """Apply a map theme via the provided theme_collection.
 
@@ -370,12 +400,14 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
         # - 選択テーマを一時的に適用して、表示されるレイヤと
         #   かつシンボルのアルファが0でないルールのみをログ出力します。
         # - それ以外の追加表示（和集合）ロジックはまだ実装しません。
-        tmp_name = "__geo_search_tmp__geo_search__"
+        tmp_prev = f"__geo_search_tmp__{uuid.uuid4().hex}"
+        tmp_sel = f"__geo_search_tmp__{uuid.uuid4().hex}"
         prev_saved = False
+        sel_saved = False
         try:
             # 現在の状態を保存（可能ならば） - 関数化して処理を委譲
             prev_theme, saved = save_current_state_as_temp_theme(
-                theme_collection, tmp_name, root, model, log_func=_log, summarize_func=_summarize_theme
+                theme_collection, tmp_prev, root, model, log_func=_log, summarize_func=_summarize_theme
             )
             if saved:
                 prev_saved = True
@@ -393,6 +425,16 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                     except Exception:
                         pass
                 return
+            # 選択テーマを適用した後、その状態を一時テーマとして保存する
+            try:
+                try:
+                    _, sel_saved = save_current_state_as_temp_theme(
+                        theme_collection, tmp_sel, root, model, log_func=_log, summarize_func=_summarize_theme
+                    )
+                except Exception:
+                    sel_saved = False
+            except Exception:
+                sel_saved = False
             
             # 凡例ノード（レイヤパネルの表示チェック）のみで判定
             # 選択テーマ適用後、レイヤパネルで可視になっているレイヤ一覧をログ出力
@@ -404,11 +446,21 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
             try:
                 if prev_saved:
                     restore_and_remove_temp_theme(
-                        theme_collection, tmp_name, root, model, log_func=_log, short_func=_short
+                        theme_collection, tmp_prev, root, model, log_func=_log, short_func=_short
                     )
             except Exception:
                 try:
                     _log("[テーマログ] prev_theme 復元の最外部で例外が発生しました", 2)
+                except Exception:
+                    pass
+
+            # 選択テーマとして保存した一時テーマは適用しないで削除する
+            try:
+                if sel_saved:
+                    remove_temp_theme(theme_collection, tmp_sel, log_func=_log)
+            except Exception:
+                try:
+                    _log("[テーマログ] sel temp の削除で例外が発生しました", 2)
                 except Exception:
                     pass
         # 追加表示の実装はまだ行わない
