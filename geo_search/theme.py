@@ -1824,15 +1824,17 @@ def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, ta
             lid = rec.get("id")
             lname = rec.get("name")
             layer = None
-            # Prefer lookup by id when available
+            # Prefer lookup by id when available (QGIS 3.40+)
             if project is not None and lid:
                 try:
-                    # QgsProject.mapLayer or mapLayersByName depending on API
-                    if hasattr(project, "mapLayer"):
+                    if hasattr(project, "mapLayerById"):
+                        layer = project.mapLayerById(lid)
+                    elif hasattr(project, "mapLayer"):
                         layer = project.mapLayer(lid)
                     else:
                         # fallback: iterate mapLayers
                         try:
+                            # QGIS 3.40+ では mapLayersByName も利用可能だが、IDで取得できない場合は全レイヤ走査
                             layers = project.mapLayers().values()
                         except Exception:
                             layers = []

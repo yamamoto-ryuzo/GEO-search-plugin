@@ -1341,12 +1341,10 @@ class SearchDialog(QDialog):
             # レイヤーを取得
             layer = None
             project = QgsProject.instance()
-            
-            # レイヤー名でレイヤーを検索
-            for lyr in project.mapLayers().values():
-                if lyr.name() == layer_name:
-                    layer = lyr
-                    break
+            # QGIS 3.40+ では mapLayersByName を優先利用
+            candidates = project.mapLayersByName(layer_name)
+            if candidates:
+                layer = candidates[0]
             
             # レイヤーの属性を取得
             available_fields = []  # リストの各要素は (field_name, display_name) のタプル
@@ -1457,12 +1455,10 @@ class SearchDialog(QDialog):
             # レイヤーを取得
             layer = None
             project = QgsProject.instance()
-            
-            # レイヤー名でレイヤーを検索
-            for lyr in project.mapLayers().values():
-                if lyr.name() == layer_name:
-                    layer = lyr
-                    break
+            # QGIS 3.40+ では mapLayersByName を優先利用
+            candidates = project.mapLayersByName(layer_name)
+            if candidates:
+                layer = candidates[0]
             
             # 利用可能なフィールドを取得
             available_fields = []  # リストの各要素は (field_name, display_name) のタプル

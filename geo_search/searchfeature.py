@@ -461,7 +461,14 @@ class SearchFeature(object):
         try:
             from qgis.core import QgsProject, QgsMessageLog
             try:
-                mapped = QgsProject.instance().mapLayer(getattr(target_layer, 'id', lambda: None)())
+                # QGIS 3.40+ では mapLayerById を推奨
+                project = QgsProject.instance()
+                layer_id = getattr(target_layer, 'id', lambda: None)()
+                mapped = None
+                if hasattr(project, 'mapLayerById'):
+                    mapped = project.mapLayerById(layer_id)
+                else:
+                    mapped = project.mapLayer(layer_id)
             except Exception:
                 mapped = None
             if mapped is not None:
