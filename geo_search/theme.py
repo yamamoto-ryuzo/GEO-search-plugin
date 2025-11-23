@@ -161,7 +161,11 @@ def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: 
                     except Exception:
                         lname = ""
 
-                messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
+                try:
+                    style_name = _get_layer_style_name(layer)
+                except Exception:
+                    style_name = None
+                messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}' style={style_name}")
                 # Collect a structured record for optional snapshot storage
                 try:
                     # Try to get legend state for storage (not only for logging)
@@ -173,11 +177,16 @@ def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: 
                 except Exception:
                     legend_state = None
 
+                try:
+                    style_name = _get_layer_style_name(layer)
+                except Exception:
+                    style_name = None
                 snapshot.append({
                     "order": order,
                     "id": lid,
                     "name": lname,
                     "legend": legend_state,
+                    "style": style_name,
                 })
                 # Optionally emit legend-state logs for each layer
                 if log_layer_legend_state_func is not None:
@@ -681,6 +690,80 @@ def group_themes(theme_names: Iterable[str]) -> Dict[Optional[str], List[str]]:
         grp = parse_theme_group(name)
         groups.setdefault(grp, []).append(name)
     return groups
+
+
+def _get_layer_style_name(layer) -> Optional[str]:
+    """Return a layer's style name/ID when available.
+
+    Tries several common APIs in a tolerant way and returns the first
+    non-empty string found. Returns None when no style name can be
+    determined. This is intentionally conservative: we only save the
+    style "name/ID" (not full renderer XML).
+    """
+    if layer is None:
+        return None
+    # try style manager on the layer (QgsMapLayerStyleManager)
+    try:
+        sm = getattr(layer, 'styleManager', None)
+        mgr = None
+        if callable(sm):
+            try:
+                mgr = sm()
+            except Exception:
+                mgr = sm
+        else:
+            mgr = sm
+
+        if mgr is not None:
+            for name in ('currentStyle', 'currentStyleName', 'defaultStyleName', 'currentStyleId'):
+                try:
+                    fn = getattr(mgr, name, None)
+                    if callable(fn):
+                        try:
+                            val = fn()
+                        except Exception:
+                            val = None
+                    else:
+                        val = fn
+                    if val:
+                        return str(val)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    # try layer-level attributes/methods
+    for attr in ('styleName', 'style', 'currentStyle', 'defaultStyle', 'defaultStyleName'):
+        try:
+            v = getattr(layer, attr, None)
+            if callable(v):
+                try:
+                    v = v()
+                except Exception:
+                    v = None
+            if v:
+                return str(v)
+        except Exception:
+            continue
+
+    # try customProperty lookup (some plugins/tools store style info there)
+    try:
+        cp = getattr(layer, 'customProperty', None)
+        if callable(cp):
+            try:
+                for key in ('style', 'styleName', 'currentStyle'):
+                    try:
+                        v = cp(key)
+                    except Exception:
+                        v = None
+                    if v:
+                        return str(v)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return None
 
 
 def get_layer_legend_state(layer):
