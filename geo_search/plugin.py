@@ -576,14 +576,28 @@ class plugin(object):
                     QgsMessageLog.logMessage("apply_selected_theme: theme_combobox is not available", "GEO-search-plugin", 1)
                 except Exception:
                     pass
+                # Ensure applying flag is cleared before returning so subsequent
+                # activations aren't blocked by a stale re-entrant guard.
+                try:
+                    self._applying_theme = False
+                except Exception:
+                    pass
                 return
 
             # 現在のテーマテキストを取得（安全に取得）
             current_theme_text = self._safe_current_text(self.theme_combobox)
             
-            # 「テーマ選択」の場合は何もしない
+            # 「テーマ選択」の場合は何もしない（プレースホルダ選択は無視）
             if current_theme_text == "テーマ選択" or index <= 0:
-                QgsMessageLog.logMessage("テーマ選択のため、適用しませんでした", "GEO-search-plugin", 0)
+                # Clear any in-progress flag so the re-entrant guard does not remain set.
+                try:
+                    self._suppress_theme_update = False
+                except Exception:
+                    pass
+                try:
+                    self._applying_theme = False
+                except Exception:
+                    pass
                 return
                 
             # 選択されたテーマを適用

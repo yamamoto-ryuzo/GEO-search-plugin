@@ -815,7 +815,34 @@ def _save_categorized_renderer_state(renderer):
             visible = None
         if visible is None:
             visible = _call_bool_methods(cat, ('renderState', 'isVisible', 'active'))
-        items.append({'index': i, 'type': 'category', 'label': label, 'value': val, 'visible': visible})
+        # Normalize category value for robust matching on restore.
+        # If the category value is a list/tuple/set (multi-value category),
+        # represent it as a comma-joined string like the legend label uses.
+        try:
+            if val is None:
+                sval = None
+            elif isinstance(val, (list, tuple, set)):
+                try:
+                    sval = ",".join([str(x).strip() for x in val])
+                except Exception:
+                    sval = str(val)
+            else:
+                # Some QGIS types may be container-like (QVariantList); try to
+                # coerce to list if possible
+                try:
+                    if hasattr(val, 'toList'):
+                        lst = val.toList()
+                        if isinstance(lst, (list, tuple, set)):
+                            sval = ",".join([str(x).strip() for x in lst])
+                        else:
+                            sval = str(val)
+                    else:
+                        sval = str(val)
+                except Exception:
+                    sval = str(val)
+        except Exception:
+            sval = None
+        items.append({'index': i, 'type': 'category', 'label': label, 'value': sval, 'visible': visible})
     return items
 
 
@@ -888,13 +915,64 @@ def _apply_categorized_visibility(layer, items, overwrite_all=False, log_func=No
     if renderer is None:
         return
 
-    # Build a mapping of category value -> desired visible state when available
+    # Build a mapping of stringified category value -> desired visible state.
+    # Use str(...) for keys so multi-value categories (lists/tuples/QVariants)
+    # are matched reliably during restore. Fall back to label when value
+    # is not present.
     mapping = {}
     for it in items:
-        if 'value' in it:
-            mapping[it['value']] = bool(it.get('visible') is True)
-        elif 'label' in it:
-            mapping[it['label']] = bool(it.get('visible') is True)
+        if 'value' in it and it.get('value') is not None:
+            try:
+                key = str(it['value'])
+                mapping[key] = bool(it.get('visible') is True)
+                # If the saved value is a comma-joined list, also expose individual tokens
+                try:
+                    if isinstance(key, str) and ',' in key:
+                        for tok in [t.strip() for t in key.split(',') if t.strip()]:
+                            if tok not in mapping:
+                                mapping[tok] = mapping[key]
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        elif 'label' in it and it.get('label') is not None:
+            try:
+                key = str(it['label'])
+                mapping[key] = bool(it.get('visible') is True)
+                try:
+                    if isinstance(key, str) and ',' in key:
+                        for tok in [t.strip() for t in key.split(',') if t.strip()]:
+                            if tok not in mapping:
+                                mapping[tok] = mapping[key]
+                except Exception:
+                    pass
+            except Exception:
+                pass
+    # local logger helper
+    def _dbg(msg: str, level: int = 0):
+        try:
+            if callable(log_func):
+                try:
+                    log_func(msg, level)
+                    return
+                except Exception:
+                    pass
+            try:
+                from qgis.core import QgsMessageLog
+            except Exception:
+                QgsMessageLog = None
+            if QgsMessageLog is not None:
+                try:
+                    QgsMessageLog.logMessage(msg, 'GEO-search-plugin', level)
+                    return
+                except Exception:
+                    pass
+            print(msg)
+        except Exception:
+            try:
+                print(msg)
+            except Exception:
+                pass
 
     try:
         # Try to import categorized renderer class for robust isinstance checks
@@ -931,6 +1009,17 @@ def _apply_categorized_visibility(layer, items, overwrite_all=False, log_func=No
             new_categories = []
             modified_any = False
 
+            # Debug: show mapping keys
+            try:
+                _dbg(f"[カテゴリ復元] mapping_keys={list(mapping.keys())}")
+            except Exception:
+                pass
+
+            # (旧: 簡易追加モード用の早期 return ブロックを削除)
+            # ここから先は現在のカテゴリ可視状態を読み取り、
+            # 保存された状態(saved)と現在の状態(cur)を比較して
+            # 最終的な desired を決めて適用する共通経路になります。
+
             # Read current renderer visibility for each existing category
             current_map = {}
             for cat in categories:
@@ -946,18 +1035,178 @@ def _apply_categorized_visibility(layer, items, overwrite_all=False, log_func=No
                     cur_vis = None
                 if cur_vis is None:
                     cur_vis = _call_bool_methods(cat, ('renderState', 'isVisible', 'active'))
-                current_map[val] = cur_vis
+                # Normalize current category value to comparable string keys
                 try:
-                    current_map[str(val)] = cur_vis
+                    key_strs = []
+                    if val is None:
+                        key_strs = [""]
+                    elif isinstance(val, (list, tuple, set)):
+                        key_str = ",".join([str(x).strip() for x in val])
+                        key_strs = [key_str] + [str(x).strip() for x in val]
+                    else:
+                        if hasattr(val, 'toList'):
+                            try:
+                                lst = val.toList()
+                                if isinstance(lst, (list, tuple, set)):
+                                    key_str = ",".join([str(x).strip() for x in lst])
+                                    key_strs = [key_str] + [str(x).strip() for x in lst]
+                                else:
+                                    key_strs = [str(val)]
+                            except Exception:
+                                key_strs = [str(val)]
+                        else:
+                            key_strs = [str(val)]
                 except Exception:
-                    pass
+                    try:
+                        key_strs = [str(val)]
+                    except Exception:
+                        key_strs = [""]
+                # populate current_map for all normalized keys
+                for ks in key_strs:
+                    if ks not in current_map:
+                        current_map[ks] = cur_vis
 
-            # Compute union (additive) or overwrite per category, then apply
+            # Apply per-category changes. For additive (overwrite_all=False):
+            # - keep existing visibility unless saved mapping explicitly True
+            # - enable saved True categories; do not disable others
             for cat in categories:
                 try:
                     val = cat.value() if callable(getattr(cat, 'value', None)) else getattr(cat, 'value', None)
                 except Exception:
                     val = getattr(cat, 'value', None)
+
+                # Build list of candidate keys to try for matching saved mapping.
+                # Handle None, list/tuple/set (multi-value categories), and
+                # comma-separated strings by expanding tokens.
+                keys_to_try = []
+                try:
+                    if val is None:
+                        # saved mapping sometimes contains an empty string key
+                        keys_to_try = [""]
+                    elif isinstance(val, (list, tuple, set)):
+                        for e in val:
+                            try:
+                                keys_to_try.append(str(e))
+                            except Exception:
+                                try:
+                                    keys_to_try.append(repr(e))
+                                except Exception:
+                                    continue
+                    else:
+                        sval = None
+                        try:
+                            sval = str(val)
+                        except Exception:
+                            try:
+                                sval = repr(val)
+                            except Exception:
+                                sval = None
+                        if sval is not None:
+                            keys_to_try.append(sval)
+                            # if the saved value is a comma-joined composite, also test tokens
+                            try:
+                                if ',' in sval:
+                                    for tok in [t.strip() for t in sval.split(',') if t.strip()]:
+                                        if tok not in keys_to_try:
+                                            keys_to_try.append(tok)
+                            except Exception:
+                                pass
+                except Exception:
+                    keys_to_try = []
+
+                # Debug: per-category info
+                try:
+                    _dbg(f"[カテゴリ復元] label={getattr(cat,'label',None)} val={val} keys={keys_to_try} mapping_has_any={any(k in mapping for k in keys_to_try)}")
+                except Exception:
+                    pass
+
+                # Determine current visibility (treat None as False)
+                try:
+                    cur_vis = None
+                    if callable(getattr(cat, 'renderState', None)):
+                        try:
+                            cur_vis = bool(cat.renderState())
+                        except Exception:
+                            cur_vis = None
+                except Exception:
+                    cur_vis = None
+                if cur_vis is None:
+                    cur_vis = _call_bool_methods(cat, ('renderState', 'isVisible', 'active'))
+                if cur_vis is None:
+                    cur_vis = False
+
+                # Decide if any saved mapping explicitly requests True
+                try:
+                    should_enable = any((k in mapping and mapping.get(k) is True) for k in keys_to_try)
+                except Exception:
+                    should_enable = False
+
+                # Additive mode: only enable saved True, do not disable existing
+                if not overwrite_all:
+                    if should_enable:
+                        try:
+                            if callable(getattr(cat, 'setRenderState', None)):
+                                cat.setRenderState(True)
+                            elif hasattr(cat, 'setActive'):
+                                cat.setActive(True)
+                            elif hasattr(cat, 'setEnabled'):
+                                cat.setEnabled(True)
+                            elif hasattr(cat, 'setVisible'):
+                                cat.setVisible(True)
+                        except Exception:
+                            pass
+                        if not cur_vis:
+                            modified_any = True
+                    # keep the existing category object (modified or not)
+                    try:
+                        new_categories.append(cat)
+                    except Exception:
+                        pass
+                    continue
+
+                # overwrite_all == True: keep previous overwrite logic
+                # saved desired visibility (may be None)
+                # Determine saved visibility by trying candidate keys (same
+                # expansion strategy as above). First matching key wins.
+                saved_vis = None
+                try:
+                    # reuse keys_to_try logic for overwrite path
+                    keys_try_overwrite = []
+                    if val is None:
+                        keys_try_overwrite = [""]
+                    elif isinstance(val, (list, tuple, set)):
+                        for e in val:
+                            try:
+                                keys_try_overwrite.append(str(e))
+                            except Exception:
+                                try:
+                                    keys_try_overwrite.append(repr(e))
+                                except Exception:
+                                    continue
+                    else:
+                        sval = None
+                        try:
+                            sval = str(val)
+                        except Exception:
+                            try:
+                                sval = repr(val)
+                            except Exception:
+                                sval = None
+                        if sval is not None:
+                            keys_try_overwrite.append(sval)
+                            try:
+                                if ',' in sval:
+                                    for tok in [t.strip() for t in sval.split(',') if t.strip()]:
+                                        if tok not in keys_try_overwrite:
+                                            keys_try_overwrite.append(tok)
+                            except Exception:
+                                pass
+                    for k in keys_try_overwrite:
+                        if k in mapping:
+                            saved_vis = mapping.get(k)
+                            break
+                except Exception:
+                    saved_vis = None
 
                 # current visibility
                 cur_vis = current_map.get(val, None)
@@ -967,28 +1216,11 @@ def _apply_categorized_visibility(layer, items, overwrite_all=False, log_func=No
                     except Exception:
                         cur_vis = None
 
-                # saved desired visibility (may be None)
-                saved_vis = None
-                if val in mapping:
-                    saved_vis = mapping.get(val)
+                if saved_vis is None:
+                    desired = cur_vis
                 else:
-                    try:
-                        saved_vis = mapping.get(str(val))
-                    except Exception:
-                        saved_vis = None
+                    desired = bool(saved_vis)
 
-                # Determine final desired state: union for additive mode, saved for overwrite
-                if overwrite_all:
-                    # If saved_vis is None, keep current; else use saved_vis
-                    if saved_vis is None:
-                        desired = cur_vis
-                    else:
-                        desired = bool(saved_vis)
-                else:
-                    # additive: enable when either current or saved is True
-                    desired = bool((cur_vis is True) or (saved_vis is True))
-
-                # Apply desired state to category via available setters
                 applied_state = False
                 try:
                     if callable(getattr(cat, 'setRenderState', None)):
@@ -1033,20 +1265,26 @@ def _apply_categorized_visibility(layer, items, overwrite_all=False, log_func=No
 
             if QgsCategorizedSymbolRenderer is not None:
                 try:
+                    _dbg(f"[カテゴリ復元] attempting to build new QgsCategorizedSymbolRenderer attr={attr} categories={len(new_categories)}")
                     new_renderer = QgsCategorizedSymbolRenderer(attr, new_categories)
                     try:
                         layer.setRenderer(new_renderer)
-                    except Exception:
+                        _dbg("[カテゴリ復元] layer.setRenderer(new_renderer) succeeded")
+                    except Exception as e_set:
+                        _dbg(f"[カテゴリ復元] layer.setRenderer failed first attempt: {e_set}")
                         try:
                             layer.setRenderer(new_renderer)
-                        except Exception:
-                            pass
+                            _dbg("[カテゴリ復元] layer.setRenderer(new_renderer) succeeded on retry")
+                        except Exception as e_set2:
+                            _dbg(f"[カテゴリ復元] layer.setRenderer failed on retry: {e_set2}")
                     try:
                         layer.triggerRepaint()
-                    except Exception:
-                        pass
+                        _dbg("[カテゴリ復元] layer.triggerRepaint() called")
+                    except Exception as e_rp:
+                        _dbg(f"[カテゴリ復元] layer.triggerRepaint() failed: {e_rp}")
                     return
-                except Exception:
+                except Exception as e:
+                    _dbg(f"[カテゴリ復元] building new renderer failed: {e}")
                     # If building new renderer failed, fall back to relying on
                     # in-place modifications already applied to category objects.
                     pass
