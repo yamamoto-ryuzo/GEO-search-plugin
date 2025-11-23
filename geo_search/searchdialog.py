@@ -1127,7 +1127,9 @@ class SearchDialog(QDialog):
                     # 既存のTQextEditエディタ
                     editor = QTextEdit(edit_dialog)
                     editor.setObjectName(f"{field_name}_editor")
-                    editor.setFont(self.get_monospace_font())
+                    font = self.get_monospace_font()
+                    if font is not None:
+                        editor.setFont(font)
                     editor.setMinimumHeight(80)
                     json_str = json.dumps(field_value, indent=2, ensure_ascii=False)
                     editor.setText(json_str)
@@ -1219,8 +1221,11 @@ class SearchDialog(QDialog):
             
             # 区切り線
             separator = QFrame()
-            separator.setFrameShape(QFrame.HLine)
-            separator.setFrameShadow(QFrame.Sunken)
+            # PyQt5/6両対応: HLine, Sunken
+            hline = getattr(QFrame, 'HLine', getattr(QFrame, 'Shape', QFrame).HLine if hasattr(getattr(QFrame, 'Shape', QFrame), 'HLine') else 1)
+            sunken = getattr(QFrame, 'Sunken', getattr(QFrame, 'Shadow', QFrame).Sunken if hasattr(getattr(QFrame, 'Shadow', QFrame), 'Sunken') else 2)
+            separator.setFrameShape(hline)
+            separator.setFrameShadow(sunken)
             layout.addWidget(separator)
             
             # 読み取り専用フィールドの前にスペースを追加
@@ -1229,8 +1234,10 @@ class SearchDialog(QDialog):
             # 読み取り専用フィールドがあれば、セクション区切りを追加
             if readonly_fields:
                 separator = QFrame()
-                separator.setFrameShape(QFrame.HLine)
-                separator.setFrameShadow(QFrame.Sunken)
+                hline = getattr(QFrame, 'HLine', getattr(QFrame, 'Shape', QFrame).HLine if hasattr(getattr(QFrame, 'Shape', QFrame), 'HLine') else 1)
+                sunken = getattr(QFrame, 'Sunken', getattr(QFrame, 'Shadow', QFrame).Sunken if hasattr(getattr(QFrame, 'Shadow', QFrame), 'Sunken') else 2)
+                separator.setFrameShape(hline)
+                separator.setFrameShadow(sunken)
                 grid_layout.addWidget(separator, row, 0, 1, 2)
                 row += 1
                 
@@ -1249,7 +1256,9 @@ class SearchDialog(QDialog):
                     
                     # 表示のみのエディタ
                     editor = QTextEdit(edit_dialog)
-                    editor.setFont(self.get_monospace_font())
+                    font = self.get_monospace_font()
+                    if font is not None:
+                        editor.setFont(font)
                     editor.setReadOnly(True)
                     editor.setStyleSheet("background-color: #f0f0f0;")
                     editor.setMinimumHeight(60)
