@@ -36,7 +36,7 @@ class ResultDialog(QDialog):
         # add tabWidget to the same grid position as original (row 0, col 0, colspan 6)
         self.gridLayout.addWidget(self.tabWidget, 0, 0, 1, 6)
         # add the original tableWidget as the first tab
-        self.tabWidget.addTab(self.tableWidget, "Results")
+        self.tabWidget.addTab(self.tableWidget, self.tr("Results"))
         # keep track of per-tab data: list of dicts with fields/features/table
         self._tabs = []
         # map the first tab
@@ -102,7 +102,7 @@ class ResultDialog(QDialog):
         # prepare table columns
         self.tableWidget.setColumnCount(len(fields) if fields else 0)
         if fields:
-            self.tableWidget.setHorizontalHeaderLabels([field.displayName() for field in fields])
+            self.tableWidget.setHorizontalHeaderLabels([self.tr(field.displayName()) for field in fields])
             header = self.tableWidget.horizontalHeader()
             # Prefer sizing to contents and then stretch the last column so
             # attributes do not collapse to very small widths under Qt6.
@@ -125,10 +125,10 @@ class ResultDialog(QDialog):
             except Exception:
                 pass
 
-        self.setWindowTitle(f"検索結果: {len(features)}件")
+        self.setWindowTitle(self.tr("Search Results: {0} items").format(len(features)))
         max_page = math.ceil(len(features) / self.page_limit) if features else 1
         self.pageBox.setMaximum(max_page)
-        self.pageLabel.setText(f" / {max_page}")
+        self.pageLabel.setText(self.tr(" / {0}").format(max_page))
         # ensure tabWidget has this single table
         # remove extra tabs and reset
         while self.tabWidget.count() > 1:
@@ -180,7 +180,7 @@ class ResultDialog(QDialog):
             heads = len(fields) if fields else 0
             table.setColumnCount(heads)
             if fields:
-                table.setHorizontalHeaderLabels([field.displayName() for field in fields])
+                table.setHorizontalHeaderLabels([self.tr(field.displayName()) for field in fields])
                 header = table.horizontalHeader()
                 try:
                     header.setMinimumSectionSize(60)
@@ -219,7 +219,7 @@ class ResultDialog(QDialog):
                 QgsMessageLog.logMessage(f"set_features_by_layer: adding tab name={name} features={len(features)}", "GEO-search-plugin", 0)
             except Exception:
                 pass
-            self.tabWidget.addTab(table, name)
+            self.tabWidget.addTab(table, self.tr(name))
             self._tabs.append({"layer": actual_layer, "fields": fields, "features": features, "table": table})
             # populate this tab's first page immediately so rows are visible
             try:
@@ -243,14 +243,14 @@ class ResultDialog(QDialog):
             except Exception:
                 pass
 
-        self.setWindowTitle(f"検索結果: {total_count}件")
+        self.setWindowTitle(self.tr("Search Results: {0} items").format(total_count))
         # initialize first tab
         self.tabWidget.setCurrentIndex(0)
         # setup paging for first tab
         first_features = self._tabs[0].get("features") or []
         max_page = math.ceil(len(first_features) / self.page_limit) if first_features else 1
         self.pageBox.setMaximum(max_page)
-        self.pageLabel.setText(f" / {max_page}")
+        self.pageLabel.setText(self.tr(" / {0}").format(max_page))
         self.pageBox.setValue(1)
         self.move_page(1)
         try:
@@ -381,7 +381,7 @@ class ResultDialog(QDialog):
                                 labels.append(f.name())
                             except Exception:
                                 labels.append(str(f))
-                    table.setHorizontalHeaderLabels(labels)
+                    table.setHorizontalHeaderLabels([self.tr(label) for label in labels])
                 except Exception:
                     pass
         except Exception:

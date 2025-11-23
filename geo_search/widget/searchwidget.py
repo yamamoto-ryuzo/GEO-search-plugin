@@ -95,25 +95,24 @@ class SearchWidget(QWidget):
             scale = None
 
         if angle is None:
-            angle_text = "角度: 未指定"
+            angle_text = self.tr("Angle: Not specified")
         else:
             try:
-                angle_text = f"角度: {float(angle)}°"
+                angle_text = self.tr("Angle: {0}°").format(float(angle))
             except Exception:
-                angle_text = f"角度: {angle}"
+                angle_text = self.tr("Angle: {0}").format(angle)
 
         if scale is None:
-            scale_text = "スケール: 未指定"
+            scale_text = self.tr("Scale: Not specified")
         else:
             try:
-                # show as integer when possible
                 s = float(scale)
                 if abs(s - int(s)) < 1e-6:
-                    scale_text = f"スケール: {int(s)}"
+                    scale_text = self.tr("Scale: {0}").format(int(s))
                 else:
-                    scale_text = f"スケール: {s}"
+                    scale_text = self.tr("Scale: {0}").format(s)
             except Exception:
-                scale_text = f"スケール: {scale}"
+                scale_text = self.tr("Scale: {0}").format(scale)
 
         la = QLabel(angle_text)
         ls = QLabel(scale_text)
@@ -177,17 +176,17 @@ class SearchTextWidget(SearchWidget):
         view_name = field.get("ViewName", "")
         if ":" in view_name and "OR検索" in view_name:
             # OR検索の場合は既に対象フィールドが含まれているので、そのまま表示
-            label = QLabel("{}".format(view_name))
+            label = QLabel(str(view_name))
         else:
-            label = QLabel("{}: ".format(view_name))
-            
+            label = QLabel(f"{view_name}: ")
+
         line_edit = QLineEdit()
         # For "All" field, set placeholder
         if field.get("all"):
-            line_edit.setPlaceholderText("Search all fields")
+            line_edit.setPlaceholderText(self.tr("Search all fields"))
         # OR検索の場合はプレースホルダーテキストでヒントを表示
         elif ":" in view_name and "OR検索" in view_name:
-            line_edit.setPlaceholderText("複数フィールドをOR検索します")
+            line_edit.setPlaceholderText(self.tr("OR search for multiple fields"))
         return label, line_edit
 
 
@@ -213,8 +212,8 @@ class SearchTibanWidget(SearchTextWidget):
         search_layout = QHBoxLayout()
         input_layout = QVBoxLayout()
         self.type_button_group = QButtonGroup()
-        self.perfect_button = QRadioButton("完全一致")
-        self.about_button = QRadioButton("あいまい検索")
+        self.perfect_button = QRadioButton(self.tr("Exact Match"))
+        self.about_button = QRadioButton(self.tr("Fuzzy Search"))
         self.type_button_group.addButton(self.perfect_button)
         self.type_button_group.addButton(self.about_button)
 
@@ -297,15 +296,15 @@ class SearchOwnerWidget(SearchTextWidget):
         self.setLayout(layout)
 
     def create_widgets(self, setting):
-        self.label = QLabel("所有者検索")
+        self.label = QLabel(self.tr("Owner Search"))
         self.label.setStyleSheet("font-weight: bold;")
         self.line_edit = QLineEdit()
 
         self.search_widgets = [self.line_edit]
         self.check_list = []
         self.type_button_group = QButtonGroup()
-        self.forward_button = QRadioButton("部分一致")
-        self.parts_button = QRadioButton("前方一致")
+        self.forward_button = QRadioButton(self.tr("Partial Match"))
+        self.parts_button = QRadioButton(self.tr("Forward Match"))
         self.type_button_group.addButton(self.forward_button)
         self.type_button_group.addButton(self.parts_button)
 

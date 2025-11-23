@@ -36,4 +36,51 @@
         <translation>Correspondance avant</translation>
     </message>
 </context>
+<context>
+    <name>SearchWidget</name>
+    <message>
+        <source>Angle: Not specified</source>
+        <translation>Angle : non spécifié</translation>
+    </message>
+    <message>
+        <source>Scale: Not specified</source>
+        <translation>Échelle : non spécifiée</translation>
+    </message>
+    <message>
+        <source>Search all fields</source>
+        <translation>Rechercher dans tous les champs</translation>
+    </message>
+    <message>
+        <source>OR search for multiple fields</source>
+        <translation>Recherche OU sur plusieurs champs</translation>
+    </message>
+    <message>
+        <source>Results</source>
+        <translation>Résultats</translation>
+    </message>
+    <message>
+        <source>Search Results: {0} items</source>
+        <translation>Résultats de recherche : {0} éléments</translation>
+    </message>
+    <message>
+        <source>Set current value</source>
+        <translation>Définir la valeur actuelle</translation>
+    </message>
+    <message>
+        <source>Geo Search: </source>
+        <translation>Recherche Géo : </translation>
+    </message>
+    <message>
+        <source>Edit Tab Settings: {0}</source>
+        <translation>Modifier les paramètres d’onglet : {0}</translation>
+    </message>
+    <message>
+        <source>Angle (deg):</source>
+        <translation>Angle (degré):</translation>
+    </message>
+    <message>
+        <source>Scale:</source>
+        <translation>Échelle:</translation>
+    </message>
+</context>
 </TS>

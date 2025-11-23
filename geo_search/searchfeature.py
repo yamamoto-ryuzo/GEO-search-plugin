@@ -326,7 +326,7 @@ class SearchFeature(object):
 
     def show_message(self):
         window = self.widget.parent()
-        QMessageBox.information(self.widget, window.windowTitle(), self.message)
+        QMessageBox.information(self.widget, window.windowTitle(), self.tr(self.message) if isinstance(self.message, str) else self.message)
 
     def open_feature_form(self, item):
         if not item:
@@ -1757,7 +1757,7 @@ class SearchTibanFeature(SearchTextFeature):
         table = self.widget.code_table
         heads = len(columns)
         table.setColumnCount(heads)
-        table.setHorizontalHeaderLabels([col["View"] for col in columns])
+        table.setHorizontalHeaderLabels([self.tr(col["View"]) for col in columns])
         header = table.horizontalHeader()
         for i in range(len(columns)):
             header.setSectionResizeMode(i, header.Stretch)

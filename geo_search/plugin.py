@@ -65,22 +65,48 @@ class plugin(object):
     def _init_language(self):
         """QGISとプラグインの言語設定を自動化"""
         try:
-            from qgis.PyQt.QtCore import QSettings, QLocale, QTranslator
-            from qgis.PyQt.QtWidgets import QApplication
+            from qgis.PyQt.QtCore import QSettings, QLocale, QTranslator, QCoreApplication
             import os
-            # QGISの設定から言語取得（なければOSのロケール）
+            # QGIS の設定から言語取得（なければ OS のロケール）
             settings = QSettings()
-            lang = settings.value('locale/userLocale', QLocale.system().name())
-            if lang:
-                settings.setValue('locale/userLocale', lang)
-            # プラグインの翻訳ファイルをロード
-            translator = QTranslator()
-            qm_path = os.path.join(os.path.dirname(__file__), 'i18n', f'{lang}.qm')
+            raw_locale = settings.value('locale/userLocale', None)
+            if raw_locale is None:
+                raw_locale = QLocale.system().name()
+
+            # raw_locale may be 'ja_JP' or 'en' etc. Normalize to language code 'ja', 'en', ...
+            try:
+                if isinstance(raw_locale, str) and '_' in raw_locale:
+                    lang_code = raw_locale.split('_')[0]
+                elif isinstance(raw_locale, str) and '-' in raw_locale:
+                    lang_code = raw_locale.split('-')[0]
+                else:
+                    lang_code = str(raw_locale)
+                lang_code = lang_code.lower()
+            except Exception:
+                lang_code = QLocale.system().name().split('_')[0]
+
+            # Supported languages (keep in sync with i18n/*.qm)
+            supported = { 'en', 'fr', 'de', 'es', 'it', 'pt', 'ja', 'zh', 'ru', 'hi' }
+
+            # If English, no translator needed (source strings are English)
+            if lang_code == 'en' or lang_code not in supported:
+                return
+
+            # Try to load a matching .qm file from the i18n folder.
+            qm_name = f"{lang_code}.qm"
+            qm_path = os.path.join(os.path.dirname(__file__), 'i18n', qm_name)
             if os.path.exists(qm_path):
-                translator.load(qm_path)
-                QApplication.instance().installTranslator(translator)
+                translator = QTranslator()
+                loaded = translator.load(qm_path)
+                if loaded:
+                    QCoreApplication.installTranslator(translator)
         except Exception as e:
-            pass  # エラーは無視（QGIS外実行時など）
+            # エラーは無視（QGIS外実行時など）。開発時はログで確認する。
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_init_language error: {e}", "GEO-search-plugin", 1)
+            except Exception:
+                pass
 
     def initGui(self):
         # プラグイン開始時に動作

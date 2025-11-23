@@ -36,4 +36,51 @@
         <translation>Vorwärtsübereinstimmung</translation>
     </message>
 </context>
+<context>
+    <name>SearchWidget</name>
+    <message>
+        <source>Angle: Not specified</source>
+        <translation>Winkel: Nicht angegeben</translation>
+    </message>
+    <message>
+        <source>Scale: Not specified</source>
+        <translation>Maßstab: Nicht angegeben</translation>
+    </message>
+    <message>
+        <source>Search all fields</source>
+        <translation>Alle Felder durchsuchen</translation>
+    </message>
+    <message>
+        <source>OR search for multiple fields</source>
+        <translation>ODER-Suche für mehrere Felder</translation>
+    </message>
+    <message>
+        <source>Results</source>
+        <translation>Ergebnisse</translation>
+    </message>
+    <message>
+        <source>Search Results: {0} items</source>
+        <translation>Suchergebnisse: {0} Einträge</translation>
+    </message>
+    <message>
+        <source>Set current value</source>
+        <translation>Aktuellen Wert setzen</translation>
+    </message>
+    <message>
+        <source>Geo Search: </source>
+        <translation>Geo-Suche: </translation>
+    </message>
+    <message>
+        <source>Edit Tab Settings: {0}</source>
+        <translation>Tab-Einstellungen bearbeiten: {0}</translation>
+    </message>
+    <message>
+        <source>Angle (deg):</source>
+        <translation>Winkel (Grad):</translation>
+    </message>
+    <message>
+        <source>Scale:</source>
+        <translation>Maßstab:</translation>
+    </message>
+</context>
 </TS>

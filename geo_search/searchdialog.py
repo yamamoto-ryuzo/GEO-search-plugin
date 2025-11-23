@@ -108,9 +108,9 @@ class SearchDialog(QDialog):
             if self.tab_groups:
                 group_name = tab_setting.get("group", OTHER_GROUP_NAME)
                 tab_group_widget = self.tab_groups[group_name]
-                tab_index = tab_group_widget.addTab(page, tab_setting["Title"])
+                tab_index = tab_group_widget.addTab(page, self.tr(tab_setting["Title"]))
             else:
-                tab_index = self.tabWidget.addTab(page, tab_setting["Title"])
+                tab_index = self.tabWidget.addTab(page, self.tr(tab_setting["Title"]))
             
             # 親のプラグインインスタンスがある場合、current_layersリストを更新
             try:
@@ -129,7 +129,7 @@ class SearchDialog(QDialog):
 
     def set_window_title(self, index):
         text = self.tabWidget.tabText(index)
-        self.setWindowTitle("地図検索: " + text)
+        self.setWindowTitle(self.tr("Geo Search: ") + text)
 
     # ID-based project id helpers removed. Matching is done by Title and group when
     # updating/removing entries from project variables.
@@ -151,7 +151,7 @@ class SearchDialog(QDialog):
         if len(tab_groups) <= 1 and OTHER_GROUP_NAME in tab_groups:
             return {}
         for group_name, group_widget in tab_groups.items():
-            self.tabWidget.addTab(group_widget, group_name)
+            self.tabWidget.addTab(group_widget, self.tr(group_name))
         return tab_groups
 
     def get_widgets(self):
@@ -777,7 +777,7 @@ class SearchDialog(QDialog):
             
             # 編集ダイアログを作成
             edit_dialog = QDialog(self)
-            edit_dialog.setWindowTitle(f"タブ設定の編集: {current_tab_title}")
+            edit_dialog.setWindowTitle(self.tr("Edit Tab Settings: {0}").format(current_tab_title))
             edit_dialog.setMinimumSize(700, 600)
             
             layout = QVBoxLayout(edit_dialog)
@@ -866,11 +866,11 @@ class SearchDialog(QDialog):
             for field_name, field_value in editable_fields.items():
                 # 日本語ラベルを使う（角度/スケールは分かりやすく表示）
                 if field_name == "angle":
-                    label = QLabel("角度（度）:", edit_dialog)
+                    label = QLabel(self.tr("Angle (deg):"), edit_dialog)
                 elif field_name == "scale":
-                    label = QLabel("スケール:", edit_dialog)
+                    label = QLabel(self.tr("Scale:"), edit_dialog)
                 else:
-                    label = QLabel(f"{field_name}:", edit_dialog)
+                    label = QLabel(self.tr(f"{field_name}:") if isinstance(field_name, str) else field_name, edit_dialog)
                 label.setStyleSheet("font-weight: bold;")
                 grid_layout.addWidget(label, row, 0)
 
@@ -954,7 +954,7 @@ class SearchDialog(QDialog):
                     from qgis.PyQt.QtWidgets import QPushButton
 
                     # ボタン: 現在の地図回転値を設定
-                    set_current_btn = QPushButton("現在の値を設定", edit_dialog)
+                    set_current_btn = QPushButton(self.tr("Set current value"), edit_dialog)
 
                     def _set_current_value(btn=None, spin_box=spin):
                         try:
