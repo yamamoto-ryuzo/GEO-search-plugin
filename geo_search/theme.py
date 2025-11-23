@@ -96,10 +96,11 @@ def save_current_state_as_temp_theme(
             except Exception:
                 summary = "<unable to summarize>"
             try:
+                # Include the temporary theme name in log output for clarity
                 if summary:
-                    log_func(f"[テーマログ] prev_theme をコレクションに保存しました: {summary}", 0)
+                    log_func(f"[テーマログ　summary] 一時テーマをコレクションに保存しました:  '{tmp_name}' : {summary}", 0)
                 else:
-                    log_func("[テーマログ] prev_theme をコレクションに保存しました", 0)
+                    log_func(f"[テーマログ　else] 一時テーマをコレクションに保存しました '{tmp_name}' ", 0)
             except Exception:
                 pass
 
@@ -195,25 +196,195 @@ def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: 
     return messages
 
 
-def restore_and_remove_temp_theme(
-    theme_collection,
-    tmp_name: str,
-    root=None,
-    model=None,
-    log_func=None,
-    short_func=None,
+def collect_visible_layer_messages_from_theme(
+    theme_or_name,
+    theme_collection=None,
+    project=None,
+    log_layer_legend_state_func=None,
+    tag: str = "GEO-search-plugin",
 ):
-    """Apply a temporary theme by name to restore previous state and then
-    remove the temporary theme from the collection.
+    """Collect and emit visible-layer messages from a saved theme.
 
-    Returns True if removal succeeded (or at least an attempt was made),
-    False otherwise. Logging is performed via `log_func` when provided.
+    Parameters:
+    - theme_or_name: either a theme object or a theme name (str).
+    - theme_collection: required when ``theme_or_name`` is a name so the
+      theme object can be retrieved from the collection.
+    - project: optional `QgsProject` instance; if not provided the function
+      will try to obtain `QgsProject.instance()`.
+    - log_layer_legend_state_func: optional callable(layer, tag=...) to
+      emit per-layer legend-state logs (same as in
+      `collect_visible_layer_messages`).
+
+    The function returns the list of message strings that were emitted.
     """
-    try:
-        if not tmp_name:
-            return False
+    messages = []
 
-        # apply the temp theme (prefer applyTheme with root/model)
+    # Resolve theme object if a name is provided
+    theme = None
+    if isinstance(theme_or_name, str):
+        if theme_collection is None:
+            return ["[テーマログ] theme_collection が指定されていません"]
+        for getter in ("mapTheme", "theme", "getMapTheme", "getTheme", "mapThemeByName", "themeByName"):
+            if hasattr(theme_collection, getter):
+                try:
+                    theme = getattr(theme_collection, getter)(theme_or_name)
+                    break
+                except Exception:
+                    continue
+        if theme is None:
+            # Try dictionary-like access as a last resort
+            try:
+                theme = getattr(theme_collection, "__getitem__", None) and theme_collection[theme_or_name]
+            except Exception:
+                theme = None
+    else:
+        theme = theme_or_name
+
+    if theme is None:
+        return ["[テーマログ] 指定したテーマオブジェクトが見つかりませんでした"]
+
+    # Try to extract layer id list from theme object via common attribute names
+    layer_ids = None
+    for attr in ("layerIds", "layers", "layer_ids", "layerIdsList", "layersList"):
+        try:
+            val = getattr(theme, attr, None)
+            if val is None:
+                continue
+            maybe = val() if callable(val) else val
+            if isinstance(maybe, (list, tuple, set)):
+                layer_ids = list(maybe)
+                break
+        except Exception:
+            continue
+
+    # If theme is dict-like, try some keys
+    if layer_ids is None:
+        try:
+            if isinstance(theme, dict):
+                if "layerIds" in theme and isinstance(theme["layerIds"], (list, tuple, set)):
+                    layer_ids = list(theme["layerIds"])
+                else:
+                    # fallback to keys if they look like ids
+                    layer_ids = [k for k in theme.keys()]
+        except Exception:
+            layer_ids = None
+
+    if not layer_ids:
+        return ["[テーマログ] テーマからレイヤIDを取得できませんでした"]
+
+    # Resolve project instance
+    if project is None:
+        try:
+            from qgis.core import QgsProject
+        except Exception:
+            QgsProject = None
+        if QgsProject is not None:
+            try:
+                project = QgsProject.instance()
+            except Exception:
+                project = None
+
+    order = 0
+    for lid in layer_ids:
+        try:
+            layer = None
+            if project is not None:
+                try:
+                    # preferred API
+                    layer = project.mapLayer(lid)
+                except Exception:
+                    try:
+                        layers_map = project.mapLayers()
+                        layer = layers_map.get(lid) if isinstance(layers_map, dict) else None
+                    except Exception:
+                        layer = None
+
+            lname = None
+            if layer is not None:
+                try:
+                    lname = layer.name()
+                except Exception:
+                    lname = getattr(layer, "name", None) or None
+
+            messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
+            if log_layer_legend_state_func is not None and layer is not None:
+                try:
+                    log_layer_legend_state_func(layer, tag=tag)
+                except Exception:
+                    pass
+            order += 1
+        except Exception:
+            continue
+
+    # Emit messages using QgsMessageLog when available, otherwise print
+    try:
+        from qgis.core import QgsMessageLog
+    except Exception:
+        QgsMessageLog = None
+
+    for m in messages:
+        try:
+            if QgsMessageLog is not None:
+                try:
+                    QgsMessageLog.logMessage(m, tag, 0)
+                except Exception:
+                    print(m)
+            else:
+                print(m)
+        except Exception:
+            try:
+                print(m)
+            except Exception:
+                pass
+
+    return messages
+
+
+
+
+
+def restore_temp_theme(theme_collection, tmp_name: str, root=None, model=None, log_func=None, short_func=None):
+    """Apply (restore) a temporary theme by name without removing it.
+
+    Returns True if the apply succeeded, False otherwise. Logging is
+    performed via `log_func` when provided.
+    """
+    if not tmp_name:
+        return False
+
+    # Try to resolve a nicer display name for logging (similar to remove_temp_theme)
+    display_name = tmp_name
+    try:
+        theme_obj = None
+        if theme_collection is not None:
+            for getter in ("mapTheme", "theme", "getMapTheme", "getTheme", "mapThemeByName", "themeByName"):
+                if hasattr(theme_collection, getter):
+                    try:
+                        theme_obj = getattr(theme_collection, getter)(tmp_name)
+                        break
+                    except Exception:
+                        continue
+        if theme_obj is not None:
+            try:
+                name_val = None
+                if hasattr(theme_obj, "name"):
+                    try:
+                        name_val = theme_obj.name() if callable(getattr(theme_obj, "name", None)) else getattr(theme_obj, "name", None)
+                    except Exception:
+                        name_val = None
+                if not name_val and hasattr(theme_obj, "title"):
+                    try:
+                        name_val = theme_obj.title() if callable(getattr(theme_obj, "title", None)) else getattr(theme_obj, "title", None)
+                    except Exception:
+                        name_val = None
+                if name_val:
+                    display_name = str(name_val)
+            except Exception:
+                pass
+    except Exception:
+        display_name = tmp_name
+
+    try:
         try:
             try:
                 theme_collection.applyTheme(tmp_name, root, model)
@@ -221,43 +392,21 @@ def restore_and_remove_temp_theme(
                 theme_collection.applyTheme(tmp_name)
             if log_func is not None:
                 try:
-                    log_func("[テーマログ] 一時テーマを適用しました", 0)
+                    log_func(f"[テーマログ] 一時テーマを適用しました: '{display_name}'", 0)
                 except Exception:
                     pass
+            return True
         except Exception as e:
             try:
                 if log_func is not None:
-                    log_func(f"[テーマログ] 一時テーマの適用に失敗しました: {short_func(e,200) if short_func is not None else str(e)}", 2)
+                    log_func(f"[テーマログ] 一時テーマ '{display_name}' の適用に失敗しました: {short_func(e,200) if short_func is not None else str(e)}", 2)
             except Exception:
                 pass
-            # continue to attempt deletion even if apply failed
-
-        # attempt to remove the temporary theme from the collection
-        try:
-            for rem_name in ("removeMapTheme", "remove", "deleteTheme", "removeTheme"):
-                if hasattr(theme_collection, rem_name):
-                    try:
-                        getattr(theme_collection, rem_name)(tmp_name)
-                        if log_func is not None:
-                            try:
-                                log_func("[テーマログ] 一時テーマを削除しました", 0)
-                            except Exception:
-                                pass
-                        return True
-                    except Exception:
-                        continue
-        except Exception:
-            try:
-                if log_func is not None:
-                    log_func("[テーマログ] 一時テーマの削除で例外が発生しました", 2)
-            except Exception:
-                pass
-
-        return False
+            return False
     except Exception:
         try:
             if log_func is not None:
-                log_func("[テーマログ] prev_theme 復元の最外部で例外が発生しました", 2)
+                log_func(f"[テーマログ] restore_temp_theme('{display_name}') の外側で例外が発生しました", 2)
         except Exception:
             pass
         return False
@@ -270,6 +419,37 @@ def remove_temp_theme(theme_collection, tmp_name: str, log_func=None):
     """
     if not tmp_name:
         return False
+    # Try to resolve a nicer display name for logging
+    display_name = tmp_name
+    try:
+        theme_obj = None
+        if theme_collection is not None:
+            for getter in ("mapTheme", "theme", "getMapTheme", "getTheme", "mapThemeByName", "themeByName"):
+                if hasattr(theme_collection, getter):
+                    try:
+                        theme_obj = getattr(theme_collection, getter)(tmp_name)
+                        break
+                    except Exception:
+                        continue
+        if theme_obj is not None:
+            try:
+                name_val = None
+                if hasattr(theme_obj, "name"):
+                    try:
+                        name_val = theme_obj.name() if callable(getattr(theme_obj, "name", None)) else getattr(theme_obj, "name", None)
+                    except Exception:
+                        name_val = None
+                if not name_val and hasattr(theme_obj, "title"):
+                    try:
+                        name_val = theme_obj.title() if callable(getattr(theme_obj, "title", None)) else getattr(theme_obj, "title", None)
+                    except Exception:
+                        name_val = None
+                if name_val:
+                    display_name = str(name_val)
+            except Exception:
+                pass
+    except Exception:
+        display_name = tmp_name
     try:
         for rem_name in ("removeMapTheme", "remove", "deleteTheme", "removeTheme"):
             if hasattr(theme_collection, rem_name):
@@ -277,7 +457,7 @@ def remove_temp_theme(theme_collection, tmp_name: str, log_func=None):
                     getattr(theme_collection, rem_name)(tmp_name)
                     if log_func is not None:
                         try:
-                            log_func("[テーマログ] 一時テーマを削除しました", 0)
+                            log_func(f"[テーマログ] 一時テーマを削除しました: '{display_name}'", 0)
                         except Exception:
                             pass
                     return True
@@ -286,7 +466,10 @@ def remove_temp_theme(theme_collection, tmp_name: str, log_func=None):
     except Exception:
         try:
             if log_func is not None:
-                log_func("[テーマログ] 一時テーマの削除で例外が発生しました", 2)
+                try:
+                    log_func(f"[テーマログ] 一時テーマ '{display_name}' の削除で例外が発生しました", 2)
+                except Exception:
+                    pass
         except Exception:
             pass
     return False
@@ -418,6 +601,45 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                     theme_collection.applyTheme(theme_name, root, model)
                 except Exception:
                     theme_collection.applyTheme(theme_name)
+
+                # ログ出力: 選択テーマを適用したことをテーマ名付きで記録する
+                try:
+                    display_name = theme_name
+                    try:
+                        theme_obj = None
+                        if theme_collection is not None:
+                            for getter in ("mapTheme", "theme", "getMapTheme", "getTheme", "mapThemeByName", "themeByName"):
+                                if hasattr(theme_collection, getter):
+                                    try:
+                                        theme_obj = getattr(theme_collection, getter)(theme_name)
+                                        break
+                                    except Exception:
+                                        continue
+                        if theme_obj is not None:
+                            try:
+                                name_val = None
+                                if hasattr(theme_obj, "name"):
+                                    try:
+                                        name_val = theme_obj.name() if callable(getattr(theme_obj, "name", None)) else getattr(theme_obj, "name", None)
+                                    except Exception:
+                                        name_val = None
+                                if not name_val and hasattr(theme_obj, "title"):
+                                    try:
+                                        name_val = theme_obj.title() if callable(getattr(theme_obj, "title", None)) else getattr(theme_obj, "title", None)
+                                    except Exception:
+                                        name_val = None
+                                if name_val:
+                                    display_name = str(name_val)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    try:
+                        _log(f"[テーマログ] 選択テーマを適用しました: '{display_name}'", 0)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             except Exception as e:
                 if QgsMessageLog:
                     try:
@@ -437,15 +659,17 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                 sel_saved = False
             
             # 凡例ノード（レイヤパネルの表示チェック）のみで判定
-            # 選択テーマ適用後、レイヤパネルで可視になっているレイヤ一覧をログ出力
+            # レイヤパネルで可視になっているレイヤ一覧をログ出力
             # collect_visible_layer_messages は内部でメッセージ出力を行う
             collect_visible_layer_messages(root, log_layer_legend_state)
  
+ 
+ 
         finally:
-            # 元の状態を復元: コレクションに保存した一時テーマ名で適用して削除する
+            # 元の状態を復元: コレクションに保存した一時テーマ名で適用する
             try:
                 if prev_saved:
-                    restore_and_remove_temp_theme(
+                    restore_temp_theme(
                         theme_collection, tmp_prev, root, model, log_func=_log, short_func=_short
                     )
             except Exception:
@@ -453,6 +677,49 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                     _log("[テーマログ] prev_theme 復元の最外部で例外が発生しました", 2)
                 except Exception:
                     pass
+
+            # 元の状態として保存した一時テーマは適用後に削除する
+            try:
+                if prev_saved:
+                    try:
+                        remove_temp_theme(theme_collection, tmp_prev, log_func=_log)
+                    except Exception:
+                        try:
+                            _log("[テーマログ] prev temp の削除で例外が発生しました", 2)
+                        except Exception:
+                            pass
+            except Exception:
+                try:
+                    _log("[テーマログ] prev temp 削除処理で外側の例外が発生しました", 2)
+                except Exception:
+                    pass
+
+            # 選択テーマ（tmp_sel）からのログ出力: 保存されたテーマの内容を確認
+            try:
+                if sel_saved:
+                    try:
+                        # obtain project instance if available
+                        proj = None
+                        if QgsProject is not None:
+                            try:
+                                proj = QgsProject.instance()
+                            except Exception:
+                                proj = None
+                        collect_visible_layer_messages_from_theme(
+                            tmp_sel, theme_collection=theme_collection, project=proj, log_layer_legend_state_func=log_layer_legend_state
+                        )
+                    except Exception:
+                        try:
+                            _log("[テーマログ本番] sel temp からのログ出力に失敗しました", 2)
+                        except Exception:
+                            pass
+            except Exception:
+                try:
+                    _log("[テーマログ本番] sel temp のログ出力処理で例外が発生しました", 2)
+                except Exception:
+                    pass
+
+
 
             # 選択テーマとして保存した一時テーマは適用しないで削除する
             try:
