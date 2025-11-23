@@ -108,14 +108,14 @@ def save_current_state_as_temp_theme(
     return prev_theme, saved
 
 
-def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: str = "GEO-search-plugin", snapshot_name: Optional[str] = None):
-    """Collect messages for layers that are visible in the layer tree and emit
-    them to the QGIS message log (or stdout when unavailable).
+def collect_visible_layer_snapshot(root, log_layer_legend_state_func=None, tag: str = "GEO-search-plugin", snapshot_name: Optional[str] = None):
+    """Collect visible layers and optionally save a snapshot.
 
-    If `log_layer_legend_state_func` is supplied it will be called for each
-    visible layer to emit additional legend-state logs; failures are ignored.
-
-    Returns the list of message strings that were emitted.
+    Formerly named `collect_visible_layer_messages`. This function collects
+    information about visible layers and emits optional log messages. When
+    `snapshot_name` is provided the structured snapshot is stored in
+    `_visible_layer_snapshots` under that name. Returns the list of emitted
+    message strings.
     """
     messages = []
     # Structure that will be saved when snapshot_name is provided
@@ -243,6 +243,9 @@ def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: 
         pass
 
     return messages
+
+# Backwards-compatible alias: keep old name working
+collect_visible_layer_messages = collect_visible_layer_snapshot
 
 def restore_temp_theme(theme_collection, tmp_name: str, root=None, model=None, log_func=None, short_func=None):
     """Apply (restore) a temporary theme by name without removing it.
@@ -561,8 +564,8 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
             
             # 凡例ノード（レイヤパネルの表示チェック）のみで判定
             # レイヤパネルで可視になっているレイヤ一覧をスナップショットとして保存
-            # collect_visible_layer_messages は内部でメッセージ出力とスナップショット保存を行う
-            collect_visible_layer_messages(root, log_layer_legend_state, snapshot_name=tmp_sel)
+            # collect_visible_layer_snapshot は内部でメッセージ出力とスナップショット保存を行う
+            collect_visible_layer_snapshot(root, log_layer_legend_state, snapshot_name=tmp_sel)
  
  
  
