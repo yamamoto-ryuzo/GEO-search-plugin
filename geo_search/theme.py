@@ -978,6 +978,154 @@ def list_visible_layer_snapshots() -> List[str]:
         return []
 
 
+def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None):
+    """Apply visible-only legend flags from `legend_state` to `layer`.
+
+    Only sets items to visible (enables); does not disable any existing items.
+    This is best-effort across renderer types and QGIS API versions.
+    """
+    if not legend_state or layer is None:
+        return
+
+    try:
+        renderer = layer.renderer()
+    except Exception:
+        renderer = None
+
+    if renderer is None:
+        return
+
+    items = legend_state.get('items') or []
+    if not items:
+        return
+
+    def _enable_obj(obj):
+        try:
+            if hasattr(obj, 'setActive'):
+                try:
+                    obj.setActive(True)
+                    return True
+                except Exception:
+                    pass
+            if hasattr(obj, 'setEnabled'):
+                try:
+                    obj.setEnabled(True)
+                    return True
+                except Exception:
+                    pass
+            if hasattr(obj, 'setVisible'):
+                try:
+                    obj.setVisible(True)
+                    return True
+                except Exception:
+                    pass
+            if hasattr(obj, 'setRenderState'):
+                try:
+                    obj.setRenderState(True)
+                    return True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return False
+
+    # Try categorized/graduated by matching labels
+    try:
+        cats = getattr(renderer, 'categories', None)
+        if callable(cats):
+            try:
+                categories = renderer.categories()
+            except Exception:
+                categories = []
+            for it in items:
+                if it.get('visible') is not True:
+                    continue
+                label = it.get('label')
+                if label is None:
+                    continue
+                for cat in categories:
+                    try:
+                        lab = cat.label() if callable(getattr(cat, 'label', None)) else getattr(cat, 'label', None)
+                    except Exception:
+                        lab = None
+                    if lab == label:
+                        _enable_obj(cat)
+            # done
+    except Exception:
+        pass
+
+    # Graduated ranges
+    try:
+        ranges_fn = getattr(renderer, 'ranges', None)
+        if callable(ranges_fn):
+            try:
+                ranges = renderer.ranges()
+            except Exception:
+                ranges = []
+            for it in items:
+                if it.get('visible') is not True:
+                    continue
+                label = it.get('label')
+                if label is None:
+                    continue
+                for r in ranges:
+                    try:
+                        lab = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
+                    except Exception:
+                        lab = None
+                    if lab == label:
+                        _enable_obj(r)
+    except Exception:
+        pass
+
+    # Rule-based: traverse rules and match labels
+    try:
+        # rootRule may exist
+        root_rule = None
+        try:
+            root_rule = renderer.rootRule()
+        except Exception:
+            root_rule = None
+
+        def _collect_rules(rule, out=None):
+            if out is None:
+                out = []
+            try:
+                children = rule.children()
+            except Exception:
+                children = []
+            for ch in children:
+                out.append(ch)
+                _collect_rules(ch, out)
+            return out
+
+        all_rules = []
+        if root_rule is not None:
+            try:
+                all_rules = _collect_rules(root_rule)
+            except Exception:
+                all_rules = []
+
+        for it in items:
+            if it.get('visible') is not True:
+                continue
+            label = it.get('label')
+            if label is None:
+                continue
+            for r in all_rules:
+                try:
+                    lab = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
+                except Exception:
+                    lab = None
+                if lab == label:
+                    _enable_obj(r)
+    except Exception:
+        pass
+
+    # Single-symbol: nothing to enable besides layer visibility
+    return
+
+
 def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, tag: str = "GEO-search-plugin", log_func=None) -> bool:
     """Restore visible-layer state from an in-memory snapshot by making those
     layers visible in the current layer tree.
@@ -1150,6 +1298,19 @@ def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, ta
                                 # Last resort: try attribute
                                 try:
                                     setattr(node, 'visible', True)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                        # Apply legend visibility (only enable visible items)
+                        try:
+                            try:
+                                legend_state = rec.get('legend')
+                            except Exception:
+                                legend_state = None
+                            if legend_state:
+                                try:
+                                    apply_legend_visibility(layer, legend_state, log_func=_logmsg)
                                 except Exception:
                                     pass
                         except Exception:
