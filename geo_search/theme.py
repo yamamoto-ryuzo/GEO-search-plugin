@@ -769,6 +769,221 @@ def _get_layer_style_name(layer) -> Optional[str]:
     return None
 
 
+def _call_bool_methods(obj, method_names):
+    for m in method_names:
+        try:
+            meth = getattr(obj, m, None)
+            if callable(meth):
+                return bool(meth())
+        except Exception:
+            continue
+    # 一部オブジェクトは属性として True/False を持つ場合もある
+    for m in method_names:
+        try:
+            val = getattr(obj, m, None)
+            if isinstance(val, bool):
+                return val
+        except Exception:
+            continue
+    return None
+
+
+def _save_categorized_renderer_state(renderer):
+    items = []
+    try:
+        categories = renderer.categories()
+    except Exception:
+        categories = []
+    for i, cat in enumerate(categories):
+        try:
+            label = cat.label() if callable(getattr(cat, 'label', None)) else getattr(cat, 'label', None)
+        except Exception:
+            label = getattr(cat, 'label', None)
+        visible = _call_bool_methods(cat, ('renderState', 'isVisible', 'active'))
+        items.append({'index': i, 'type': 'category', 'label': label, 'visible': visible})
+    return items
+
+
+def _save_graduated_renderer_state(renderer):
+    items = []
+    try:
+        ranges = renderer.ranges()
+    except Exception:
+        ranges = []
+    for i, r in enumerate(ranges):
+        try:
+            label = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
+        except Exception:
+            label = getattr(r, 'label', None)
+        visible = _call_bool_methods(r, ('renderState', 'isVisible', 'active'))
+        items.append({'index': i, 'type': 'range', 'label': label, 'visible': visible})
+    return items
+
+
+def _save_rulebased_renderer_state(renderer):
+    items = []
+    try:
+        root_rule = renderer.rootRule()
+
+        def _collect_rules(rule, out=None):
+            if out is None:
+                out = []
+            for ch in rule.children():
+                out.append(ch)
+                _collect_rules(ch, out)
+            return out
+
+        all_rules = _collect_rules(root_rule)
+    except Exception:
+        all_rules = []
+
+    legend_rules = [r for r in all_rules if (getattr(r, 'label', None) and (r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)))]
+    for i, r in enumerate(legend_rules):
+        try:
+            label = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
+        except Exception:
+            label = None
+        visible = _call_bool_methods(r, ('active', 'renderState', 'isVisible'))
+        items.append({'index': i, 'type': 'rule', 'label': label, 'visible': visible})
+    return items
+
+
+def _save_single_renderer_state(renderer, layer_name=None):
+    visible = True
+    items = [{'index': 0, 'type': 'single', 'label': layer_name or '(single)', 'visible': visible}]
+    return items
+
+
+def _apply_categorized_visibility(renderer, items, overwrite_all=False, log_func=None):
+    try:
+        cats_fn = getattr(renderer, 'categories', None)
+        if not callable(cats_fn):
+            return
+        try:
+            categories = renderer.categories()
+        except Exception:
+            categories = []
+        for it in items:
+            label = it.get('label')
+            if label is None:
+                continue
+            desired = True if it.get('visible') is True else False
+            if not overwrite_all and not desired:
+                continue
+            for cat in categories:
+                try:
+                    lab = cat.label() if callable(getattr(cat, 'label', None)) else getattr(cat, 'label', None)
+                except Exception:
+                    lab = None
+                if lab == label:
+                    try:
+                        if hasattr(cat, 'setActive'):
+                            cat.setActive(bool(desired))
+                        elif hasattr(cat, 'setEnabled'):
+                            cat.setEnabled(bool(desired))
+                        elif hasattr(cat, 'setVisible'):
+                            cat.setVisible(bool(desired))
+                        elif hasattr(cat, 'setRenderState'):
+                            cat.setRenderState(bool(desired))
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+
+
+def _apply_graduated_visibility(renderer, items, overwrite_all=False, log_func=None):
+    try:
+        ranges_fn = getattr(renderer, 'ranges', None)
+        if not callable(ranges_fn):
+            return
+        try:
+            ranges = renderer.ranges()
+        except Exception:
+            ranges = []
+        for it in items:
+            label = it.get('label')
+            if label is None:
+                continue
+            desired = True if it.get('visible') is True else False
+            if not overwrite_all and not desired:
+                continue
+            for r in ranges:
+                try:
+                    lab = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
+                except Exception:
+                    lab = None
+                if lab == label:
+                    try:
+                        if hasattr(r, 'setActive'):
+                            r.setActive(bool(desired))
+                        elif hasattr(r, 'setEnabled'):
+                            r.setEnabled(bool(desired))
+                        elif hasattr(r, 'setVisible'):
+                            r.setVisible(bool(desired))
+                        elif hasattr(r, 'setRenderState'):
+                            r.setRenderState(bool(desired))
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+
+
+def _apply_rulebased_visibility(renderer, items, overwrite_all=False, log_func=None):
+    try:
+        root_rule = None
+        try:
+            root_rule = renderer.rootRule()
+        except Exception:
+            root_rule = None
+
+        def _collect_rules(rule, out=None):
+            if out is None:
+                out = []
+            try:
+                children = rule.children()
+            except Exception:
+                children = []
+            for ch in children:
+                out.append(ch)
+                _collect_rules(ch, out)
+            return out
+
+        all_rules = []
+        if root_rule is not None:
+            try:
+                all_rules = _collect_rules(root_rule)
+            except Exception:
+                all_rules = []
+
+        for it in items:
+            label = it.get('label')
+            if label is None:
+                continue
+            desired = True if it.get('visible') is True else False
+            if not overwrite_all and not desired:
+                continue
+            for r in all_rules:
+                try:
+                    lab = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
+                except Exception:
+                    lab = None
+                if lab == label:
+                    try:
+                        if hasattr(r, 'setActive'):
+                            r.setActive(bool(desired))
+                        elif hasattr(r, 'setEnabled'):
+                            r.setEnabled(bool(desired))
+                        elif hasattr(r, 'setVisible'):
+                            r.setVisible(bool(desired))
+                        elif hasattr(r, 'setRenderState'):
+                            r.setRenderState(bool(desired))
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+
+
+
 def _apply_layer_style_by_name(layer, style_name: str, log_func=None) -> bool:
     """Try to apply a style (by name or id) to a layer in a best-effort way.
 
@@ -882,23 +1097,7 @@ def get_layer_legend_state(layer):
     renderer_class_name = type(renderer).__name__ if renderer is not None else None
     result['renderer'] = renderer_class_name
 
-    def _call_bool_methods(obj, method_names):
-        for m in method_names:
-            try:
-                meth = getattr(obj, m, None)
-                if callable(meth):
-                    return bool(meth())
-            except Exception:
-                continue
-        # 一部オブジェクトは属性として True/False を持つ場合もある
-        for m in method_names:
-            try:
-                val = getattr(obj, m, None)
-                if isinstance(val, bool):
-                    return val
-            except Exception:
-                continue
-        return None
+    # Use module-level helpers for boolean method probing and renderer saves
 
     # レンダラーが無ければ終了
     if renderer is None:
@@ -922,19 +1121,10 @@ def get_layer_legend_state(layer):
         if (QgsCategorizedSymbolRenderer is not None and isinstance(renderer, QgsCategorizedSymbolRenderer)) or (
             QgsCategorizedSymbolRenderer is None and renderer_class_name == 'QgsCategorizedSymbolRenderer'
         ):
-            items = []
             try:
-                categories = renderer.categories()
+                result['items'] = _save_categorized_renderer_state(renderer)
             except Exception:
-                categories = []
-            for i, cat in enumerate(categories):
-                try:
-                    label = cat.label()
-                except Exception:
-                    label = getattr(cat, 'label', None)
-                visible = _call_bool_methods(cat, ('renderState', 'isVisible', 'active'))
-                items.append({'index': i, 'type': 'category', 'label': label, 'visible': visible})
-            result['items'] = items
+                result['items'] = []
             return result
     except Exception:
         pass
@@ -944,19 +1134,10 @@ def get_layer_legend_state(layer):
         if (QgsGraduatedSymbolRenderer is not None and isinstance(renderer, QgsGraduatedSymbolRenderer)) or (
             QgsGraduatedSymbolRenderer is None and renderer_class_name == 'QgsGraduatedSymbolRenderer'
         ):
-            items = []
             try:
-                ranges = renderer.ranges()
+                result['items'] = _save_graduated_renderer_state(renderer)
             except Exception:
-                ranges = []
-            for i, r in enumerate(ranges):
-                try:
-                    label = r.label()
-                except Exception:
-                    label = getattr(r, 'label', None)
-                visible = _call_bool_methods(r, ('renderState', 'isVisible', 'active'))
-                items.append({'index': i, 'type': 'range', 'label': label, 'visible': visible})
-            result['items'] = items
+                result['items'] = []
             return result
     except Exception:
         pass
@@ -966,32 +1147,10 @@ def get_layer_legend_state(layer):
         if (QgsRuleBasedRenderer is not None and isinstance(renderer, QgsRuleBasedRenderer)) or (
             QgsRuleBasedRenderer is None and renderer_class_name == 'QgsRuleBasedRenderer'
         ):
-            items = []
             try:
-                root_rule = renderer.rootRule()
-
-                def _collect_rules(rule, out=None):
-                    if out is None:
-                        out = []
-                    for ch in rule.children():
-                        out.append(ch)
-                        _collect_rules(ch, out)
-                    return out
-
-                all_rules = _collect_rules(root_rule)
+                result['items'] = _save_rulebased_renderer_state(renderer)
             except Exception:
-                all_rules = []
-
-            # ラベルのあるルールを凡例アイテムと見なす
-            legend_rules = [r for r in all_rules if (getattr(r, 'label', None) and (r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)))]
-            for i, r in enumerate(legend_rules):
-                try:
-                    label = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
-                except Exception:
-                    label = None
-                visible = _call_bool_methods(r, ('active', 'renderState', 'isVisible'))
-                items.append({'index': i, 'type': 'rule', 'label': label, 'visible': visible})
-            result['items'] = items
+                result['items'] = []
             return result
     except Exception:
         pass
@@ -1001,15 +1160,10 @@ def get_layer_legend_state(layer):
         if (QgsSingleSymbolRenderer is not None and isinstance(renderer, QgsSingleSymbolRenderer)) or (
             QgsSingleSymbolRenderer is None and renderer_class_name == 'QgsSingleSymbolRenderer'
         ):
-            # 単一シンボルは凡例項目の概念が薄いが、表示状態を返す
-            visible = True
-            # レイヤの表示自体を確認できる場合は優先して使う
             try:
-                from qgis.utils import iface
+                result['items'] = _save_single_renderer_state(renderer, layer_name=result.get('layer_name'))
             except Exception:
-                iface = None
-            items = [{'index': 0, 'type': 'single', 'label': result['layer_name'] or '(single)', 'visible': visible}]
-            result['items'] = items
+                result['items'] = []
             return result
     except Exception:
         pass
@@ -1184,100 +1338,17 @@ def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None, 
             pass
         return False
 
-    # Try categorized/graduated by matching labels
+    # Delegate renderer-specific visibility application to helpers
     try:
-        cats = getattr(renderer, 'categories', None)
-        if callable(cats):
-            try:
-                categories = renderer.categories()
-            except Exception:
-                categories = []
-            for it in items:
-                label = it.get('label')
-                if label is None:
-                    continue
-                desired = True if it.get('visible') is True else False
-                # If not overwrite_all, we only enable True items
-                if not overwrite_all and not desired:
-                    continue
-                for cat in categories:
-                    try:
-                        lab = cat.label() if callable(getattr(cat, 'label', None)) else getattr(cat, 'label', None)
-                    except Exception:
-                        lab = None
-                    if lab == label:
-                        _set_obj_state(cat, desired)
-            # done
+        _apply_categorized_visibility(renderer, items, overwrite_all=overwrite_all, log_func=log_func)
     except Exception:
         pass
-
-    # Graduated ranges
     try:
-        ranges_fn = getattr(renderer, 'ranges', None)
-        if callable(ranges_fn):
-            try:
-                ranges = renderer.ranges()
-            except Exception:
-                ranges = []
-            for it in items:
-                label = it.get('label')
-                if label is None:
-                    continue
-                desired = True if it.get('visible') is True else False
-                if not overwrite_all and not desired:
-                    continue
-                for r in ranges:
-                    try:
-                        lab = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
-                    except Exception:
-                        lab = None
-                    if lab == label:
-                        _set_obj_state(r, desired)
+        _apply_graduated_visibility(renderer, items, overwrite_all=overwrite_all, log_func=log_func)
     except Exception:
         pass
-
-    # Rule-based: traverse rules and match labels
     try:
-        # rootRule may exist
-        root_rule = None
-        try:
-            root_rule = renderer.rootRule()
-        except Exception:
-            root_rule = None
-
-        def _collect_rules(rule, out=None):
-            if out is None:
-                out = []
-            try:
-                children = rule.children()
-            except Exception:
-                children = []
-            for ch in children:
-                out.append(ch)
-                _collect_rules(ch, out)
-            return out
-
-        all_rules = []
-        if root_rule is not None:
-            try:
-                all_rules = _collect_rules(root_rule)
-            except Exception:
-                all_rules = []
-
-        for it in items:
-            label = it.get('label')
-            if label is None:
-                continue
-            desired = True if it.get('visible') is True else False
-            if not overwrite_all and not desired:
-                continue
-            for r in all_rules:
-                try:
-                    lab = r.label() if callable(getattr(r, 'label', None)) else getattr(r, 'label', None)
-                except Exception:
-                    lab = None
-                if lab == label:
-                    _set_obj_state(r, desired)
+        _apply_rulebased_visibility(renderer, items, overwrite_all=overwrite_all, log_func=log_func)
     except Exception:
         pass
 
