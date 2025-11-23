@@ -20,6 +20,10 @@ import uuid
 import re
 from typing import Iterable, Dict, List, Optional, Tuple
 
+# In-memory store for visible-layer snapshots (for later restore)
+# Keyed by snapshot name -> list of per-layer dicts
+_visible_layer_snapshots: Dict[str, List[Dict]] = {}
+
 def save_current_state_as_temp_theme(
     theme_collection,
     tmp_name: str,
@@ -104,7 +108,7 @@ def save_current_state_as_temp_theme(
     return prev_theme, saved
 
 
-def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: str = "GEO-search-plugin"):
+def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: str = "GEO-search-plugin", snapshot_name: Optional[str] = None):
     """Collect messages for layers that are visible in the layer tree and emit
     them to the QGIS message log (or stdout when unavailable).
 
@@ -114,6 +118,8 @@ def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: 
     Returns the list of message strings that were emitted.
     """
     messages = []
+    # Structure that will be saved when snapshot_name is provided
+    snapshot: List[Dict] = []
     try:
         try:
             nodes = root.findLayers()
@@ -156,6 +162,23 @@ def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: 
                         lname = ""
 
                 messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
+                # Collect a structured record for optional snapshot storage
+                try:
+                    # Try to get legend state for storage (not only for logging)
+                    legend_state = None
+                    try:
+                        legend_state = get_layer_legend_state(layer)
+                    except Exception:
+                        legend_state = None
+                except Exception:
+                    legend_state = None
+
+                snapshot.append({
+                    "order": order,
+                    "id": lid,
+                    "name": lname,
+                    "legend": legend_state,
+                })
                 # Optionally emit legend-state logs for each layer
                 if log_layer_legend_state_func is not None:
                     try:
@@ -189,6 +212,26 @@ def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: 
                 print(m)
             except Exception:
                 pass
+
+    # Save snapshot in-memory if requested (does not perform any restore)
+    try:
+        if snapshot_name:
+            try:
+                _visible_layer_snapshots[str(snapshot_name)] = snapshot
+                # also emit a short confirmation message
+                info = f"[テーマログ] visible-layer snapshot '{snapshot_name}' をメモリに保存しました (layers={len(snapshot)})"
+                try:
+                    if QgsMessageLog is not None:
+                        QgsMessageLog.logMessage(info, tag, 0)
+                    else:
+                        print(info)
+                except Exception:
+                    print(info)
+            except Exception:
+                # ignore snapshot save failures
+                pass
+    except Exception:
+        pass
 
     return messages
 
@@ -508,9 +551,9 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                 sel_saved = False
             
             # 凡例ノード（レイヤパネルの表示チェック）のみで判定
-            # レイヤパネルで可視になっているレイヤ一覧をログ出力
-            # collect_visible_layer_messages は内部でメッセージ出力を行う
-            collect_visible_layer_messages(root, log_layer_legend_state)
+            # レイヤパネルで可視になっているレイヤ一覧をスナップショットとして保存
+            # collect_visible_layer_messages は内部でメッセージ出力とスナップショット保存を行う
+            collect_visible_layer_messages(root, log_layer_legend_state, snapshot_name=tmp_sel)
  
  
  
@@ -540,6 +583,27 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
             except Exception:
                 try:
                     _log("[テーマログ] prev temp 削除処理で外側の例外が発生しました", 2)
+                except Exception:
+                    pass
+
+            # 選択テーマのスナップショットを現在の表示に反映（追加可視）
+            try:
+                if sel_saved:
+                    try:
+                        # Use QgsProject.instance() if available
+                        try:
+                            project_for_reload = QgsProject.instance() if QgsProject is not None else None
+                        except Exception:
+                            project_for_reload = None
+                        collect_visible_layer_reload(tmp_sel, project=project_for_reload, root=root, tag="GEO-search-plugin", log_func=_log)
+                    except Exception:
+                        try:
+                            _log("[テーマログ] sel snapshot の反映で例外が発生しました", 2)
+                        except Exception:
+                            pass
+            except Exception:
+                try:
+                    _log("[テーマログ] sel snapshot 反映処理で外側の例外が発生しました", 2)
                 except Exception:
                     pass
 
@@ -895,6 +959,191 @@ def log_layer_legend_state_by_name(layer_name: str, project=None, tag: str = "GE
     log_layer_legend_state(layers[0], tag=tag)
 
 
+def get_visible_layer_snapshot(name: str) -> Optional[List[Dict]]:
+    """Return a previously saved visible-layer snapshot by name.
+
+    Returns the list of per-layer dicts or None if not found.
+    """
+    try:
+        return _visible_layer_snapshots.get(name)
+    except Exception:
+        return None
+
+
+def list_visible_layer_snapshots() -> List[str]:
+    """Return the list of snapshot names currently stored in memory."""
+    try:
+        return list(_visible_layer_snapshots.keys())
+    except Exception:
+        return []
+
+
+def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, tag: str = "GEO-search-plugin", log_func=None) -> bool:
+    """Restore visible-layer state from an in-memory snapshot by making those
+    layers visible in the current layer tree.
+
+    This function performs an additive operation: it makes the snapshot's
+    layers visible in the current view but does not hide other layers.
+
+    Returns True on (attempted) success, False if the snapshot was missing.
+    """
+    try:
+        from qgis.core import QgsMessageLog
+    except Exception:
+        QgsMessageLog = None
+
+    def _logmsg(m: str, level: int = 0):
+        try:
+            if log_func is not None:
+                try:
+                    log_func(m, level)
+                    return
+                except Exception:
+                    pass
+            if QgsMessageLog is not None:
+                try:
+                    QgsMessageLog.logMessage(m, tag, level)
+                    return
+                except Exception:
+                    pass
+            print(m)
+        except Exception:
+            try:
+                print(m)
+            except Exception:
+                pass
+
+    snap = get_visible_layer_snapshot(snapshot_name)
+    if not snap:
+        _logmsg(f"[テーマログ] snapshot '{snapshot_name}' が見つかりません", 1)
+        return False
+
+    # Try to obtain project instance if not provided
+    try:
+        from qgis.core import QgsProject
+    except Exception:
+        QgsProject = None
+
+    if project is None and QgsProject is not None:
+        try:
+            project = QgsProject.instance()
+        except Exception:
+            project = None
+
+    applied = 0
+    for rec in snap:
+        try:
+            lid = rec.get("id")
+            lname = rec.get("name")
+            layer = None
+            # Prefer lookup by id when available
+            if project is not None and lid:
+                try:
+                    # QgsProject.mapLayer or mapLayersByName depending on API
+                    if hasattr(project, "mapLayer"):
+                        layer = project.mapLayer(lid)
+                    else:
+                        # fallback: iterate mapLayers
+                        try:
+                            layers = project.mapLayers().values()
+                        except Exception:
+                            layers = []
+                        for L in layers:
+                            try:
+                                if (callable(getattr(L, "id", None)) and L.id() == lid) or getattr(L, "id", None) == lid:
+                                    layer = L
+                                    break
+                            except Exception:
+                                continue
+                except Exception:
+                    layer = None
+            # fallback to name-based search
+            if layer is None and project is not None and lname:
+                try:
+                    candidates = project.mapLayersByName(lname)
+                    if candidates:
+                        layer = candidates[0]
+                except Exception:
+                    layer = None
+
+            if layer is None:
+                _logmsg(f"[テーマログ] snapshot のレイヤが見つかりません id={lid} name='{lname}'", 1)
+                continue
+
+            # Try to find layer tree node and set visibility
+            node_found = False
+            if root is not None:
+                try:
+                    # Prefer API that finds node by layer id
+                    node = None
+                    try:
+                        if hasattr(root, 'findLayer'):
+                            node = root.findLayer(lid)
+                    except Exception:
+                        node = None
+                    # If findLayer not available or failed, search nodes
+                    if node is None:
+                        try:
+                            nodes = root.findLayers()
+                        except Exception:
+                            nodes = []
+                        for n in nodes:
+                            try:
+                                L = n.layer()
+                                lid2 = None
+                                try:
+                                    lid2 = L.id() if callable(getattr(L, 'id', None)) else getattr(L, 'id', None)
+                                except Exception:
+                                    lid2 = None
+                                if lid2 == lid:
+                                    node = n
+                                    break
+                            except Exception:
+                                continue
+
+                    if node is not None:
+                        node_found = True
+                        # Try several visibility setters
+                        try:
+                            if hasattr(node, 'setItemVisibilityChecked'):
+                                node.setItemVisibilityChecked(True)
+                            elif hasattr(node, 'setVisible'):
+                                node.setVisible(True)
+                            elif hasattr(node, 'setIsVisible'):
+                                node.setIsVisible(True)
+                            else:
+                                # Last resort: try attribute
+                                try:
+                                    setattr(node, 'visible', True)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                except Exception:
+                    node_found = False
+
+            # If we couldn't operate on the node, try to make layer visible via project layer tree (some APIs)
+            if not node_found:
+                try:
+                    # Some environments allow setting layer visibility via layer.setItemVisibility or similar
+                    # Try to set an attribute 'visible' on the layer object as a last resort (non-standard)
+                    if hasattr(layer, 'setCustomProperty'):
+                        try:
+                            # no-op placeholder; keep compatibility
+                            pass
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            applied += 1
+        except Exception:
+            continue
+
+    _logmsg(f"[テーマログ] snapshot '{snapshot_name}' の可視レイヤを現在の表示に反映しました (attempted={applied})", 0)
+    return True
+
+
 __all__ = [
     "apply_theme",
     "_get_theme_brackets",
@@ -903,4 +1152,7 @@ __all__ = [
     "get_layer_legend_state",
     "log_layer_legend_state",
     "log_layer_legend_state_by_name",
+    "get_visible_layer_snapshot",
+    "list_visible_layer_snapshots",
+    "collect_visible_layer_reload",
 ]
