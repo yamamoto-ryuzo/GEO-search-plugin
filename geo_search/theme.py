@@ -766,6 +766,75 @@ def _get_layer_style_name(layer) -> Optional[str]:
     return None
 
 
+def _apply_layer_style_by_name(layer, style_name: str, log_func=None) -> bool:
+    """Try to apply a style (by name or id) to a layer in a best-effort way.
+
+    Returns True if any attempted API call succeeded, False otherwise.
+    This function is intentionally defensive to support multiple QGIS versions
+    and layer types.
+    """
+    if layer is None or not style_name:
+        return False
+
+    # Try style manager on the layer first
+    try:
+        sm = getattr(layer, 'styleManager', None)
+        mgr = None
+        if callable(sm):
+            try:
+                mgr = sm()
+            except Exception:
+                mgr = sm
+        else:
+            mgr = sm
+
+        if mgr is not None:
+            for setter in (
+                'setCurrentStyle',
+                'setCurrentStyleName',
+                'setStyle',
+                'setStyleByName',
+                'applyStyle',
+                'applyNamedStyle',
+            ):
+                try:
+                    fn = getattr(mgr, setter, None)
+                    if callable(fn):
+                        fn(style_name)
+                        return True
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    # Try layer-level setters
+    for setter in ('setCurrentStyle', 'setStyle', 'setStyleName', 'applyStyle', 'setDefaultStyle'):
+        try:
+            fn = getattr(layer, setter, None)
+            if callable(fn):
+                fn(style_name)
+                return True
+        except Exception:
+            continue
+
+    # If style_name looks like a file path, try loadNamedStyle
+    try:
+        import os
+
+        if os.path.sep in style_name or style_name.lower().endswith(('.qml', '.sld', '.xml')):
+            load_fn = getattr(layer, 'loadNamedStyle', None)
+            if callable(load_fn):
+                try:
+                    load_fn(style_name)
+                    return True
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return False
+
+
 def get_layer_legend_state(layer):
     """レイヤの凡例（レジェンド）チェック状態を取得して構造化して返す。
 
@@ -1423,6 +1492,22 @@ def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, ta
                             if legend_state:
                                 try:
                                     overwrite = not bool(orig_node_visible)
+                                    # If the layer was originally non-visible (overwrite==True),
+                                    # try to apply the saved style before applying legend on/off
+                                    try:
+                                        if overwrite:
+                                            style_name = rec.get('style')
+                                            if style_name:
+                                                try:
+                                                    applied_style = _apply_layer_style_by_name(layer, style_name, log_func=_logmsg)
+                                                    if applied_style:
+                                                        _logmsg(f"[テーマログ] レイヤ '{lname}' にスタイル '{style_name}' を適用しました", 0)
+                                                    else:
+                                                        _logmsg(f"[テーマログ] レイヤ '{lname}' のスタイル '{style_name}' の適用に失敗しました", 1)
+                                                except Exception:
+                                                    pass
+                                    except Exception:
+                                        pass
                                     apply_legend_visibility(layer, legend_state, log_func=_logmsg, overwrite_all=overwrite)
                                 except Exception:
                                     pass

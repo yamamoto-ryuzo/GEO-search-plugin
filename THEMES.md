@@ -1,11 +1,11 @@
 ```markdown
-# マップテーマ（Map Themes）機能の概要
+# マップテーマ（Map Themes）機能の概要 — テーマ管理サブシステム
 
-このドキュメントはプラグイン内の「マップテーマ選択／適用機能」について、何をしているか・どのファイルで実装しているか・設定方法と拡張方法を整理したものです。
+このドキュメントは `GEO Search System` におけるテーマ／表示管理サブシステム（Map Themes）の設計と実装についてまとめたものです。検索サブシステムと連携して検索時の表示適用や「追加表示モード」を提供する役割を担います。
 
-**目的**
-- QGIS のマップテーマ（Map Theme）をプラグイン側から一覧取得・即時適用できるようにする。
- - 検索実行時にあらかじめ設定されたテーマを自動で適用できるようにする（必要に応じて現在表示状態を `検索前` として保存します）。
+**目的（サブシステムとして）**
+- QGIS のマップテーマ（Map Theme）を一覧取得・即時適用できるAPIとUIを提供し、検索ワークフローと統合する。
+- 検索実行時にあらかじめ設定されたテーマを自動で適用する（必要に応じて現在表示状態を `検索前` として保存し、復元可能にする）。
 
 ---
 
@@ -89,6 +89,39 @@
   - エンドユーザー（QGIS 上でプラグインを使いテーマを切替える人）
   - 開発者（プラグインの挙動を理解・拡張・デバッグしたい人）
 
+  ## サブシステム図と境界（開発者向け）
+
+  簡易図（テキスト）:
+
+  ```
+    [Search Subsystem]  --(requests theme apply)->  [Theme Management Subsystem]
+             ^                                              |
+             |                                              v
+      UI (Search dialog)                            Theme storage / snapshot
+                                                    (collect_visible_layer_messages)
+                                                    (collect_visible_layer_reload)
+  ```
+
+  主要境界関数／実装参照:
+
+  - `geo_search/plugin.py`
+    - `update_theme_combobox()` — UI 側のテーマリスト更新
+    - `apply_selected_theme()` — UI から直接テーマ適用
+  - `geo_search/searchfeature.py`
+    - `SearchFeature` の `show_features()` — 検索からテーマ適用要求を行う接点
+  - `geo_search/theme.py` (実装上の主要関数)
+    - `collect_visible_layer_messages(root, snapshot_name=...)` — 可視レイヤのスナップショット取得
+    - `collect_visible_layer_reload(snapshot_name, ...)` — スナップショットを現在の表示に反映（追加表示ロジック）
+    - `apply_legend_visibility(layer, legend_state, overwrite_all=False)` — 凡例状態を適用する
+    - `_get_layer_style_name(layer)` / `_apply_layer_style_by_name(layer, style_name, ...)` — スタイル名の取得とベストエフォート適用
+
+  連携ポイント（Search ↔ Theme）:
+
+  - 検索タブ設定の `selectTheme` を通じて、Search サブシステムが Theme サブシステムに「指定テーマを適用してほしい」と依頼する。
+  - `additive`（追加表示モード）フラグがある場合、Theme サブシステムは tmp テーマの保存→適用→スナップショット取得→元復元→スナップショット反映 のフローで UI を破壊せずに表示を変更する。
+
+  このセクションは、開発者がどこを参照すれば Search ↔ Theme の連携実装が分かるかを素早く掴めるようにするための要約です。
+
 
   ## クイックスタート
 
@@ -125,6 +158,7 @@
     - レイヤ ID（存在する場合）
     - レイヤ名（表示名）
     - 凡例（レジェンド）項目の配列とそれぞれの `visible` フラグ
+    - レイヤのスタイル名／ID（`style`）：復元時にスタイルを再適用するために保存します
 
   - スナップショットの保存場所: モジュール変数に保持（プロセス内メモリ）。
 
@@ -147,6 +181,7 @@
 
   - スナップショットに従って凡例項目の `visible` を True/False の両方で上書きします。
   - 主に「テーマ側の完全な凡例状態を再現したい」特殊ケースで使います。
+  - レイヤが元々非可視で復元時に凡例を上書きするケースでは、凡例のオン/オフを上書きする前にスナップショットに保存された `style`（スタイル名/ID）を先に適用します。スタイル適用に成功すれば、スタイル依存の凡例表現（ルールの有効化など）がより正確に再現されます。
 
   実装上はレンダラーの種類（カテゴリ分け、ルールベース、グラデュエーテッドなど）で API が異なるため、
   ラベル一致などのベストエフォートな照合を行います。ラベルが重複する場合は誤認の可能性があります。
@@ -171,6 +206,8 @@
         {"label": "主要道路", "visible": true},
         {"label": "歩道", "visible": false}
       ]
+    ,
+    "style": "<style-name-or-id>"
     }
   }
   ```
@@ -188,6 +225,8 @@
 
   - `collect_visible_layer_messages(root, snapshot_name=None, ...)` — 現在の可視レイヤー情報を収集し、
     `snapshot_name` が与えられれば `_visible_layer_snapshots` に保存する。ログは `QgsMessageLog` を使う。
+  - `_get_layer_style_name(layer)` — レイヤからスタイル名/ID を取得するユーティリティ。
+  - `_apply_layer_style_by_name(layer, style_name, log_func=None)` — 保存済みのスタイル名をベストエフォートで適用するユーティリティ。
   - `get_visible_layer_snapshot(name)` — 保存済みスナップショットを返す（なければ None）。
   - `list_visible_layer_snapshots()` — 利用可能なスナップショット名一覧を返す。
   - `collect_visible_layer_reload(snapshot_name, project=None, root=None, ...)` — スナップショットを現在の
@@ -218,15 +257,6 @@
   5. 上書きモードで凡例を復元するテスト:
      - `apply_legend_visibility(..., overwrite_all=True)` を直接呼び出せる環境で、完全に一致するか確認する。
 
-
-  ## 変更履歴 / 連絡先
-
-  - 2025-11-23: ドキュメントをマニュアル形式に再構成（目次、クイックスタート、詳細説明、実装仕様、テスト手順を追加）。
-
-  ---
-
-  このドキュメントの改善案や、スナップショットをプロジェクトへ永続化する拡張、
-  あるいはグループの展開状態（setExpanded）を復元する機能の追加が必要なら、次に何を優先するか教えてください。
 
 **今後の改善案**
 
