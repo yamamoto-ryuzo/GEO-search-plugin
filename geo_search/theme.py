@@ -20,9 +20,6 @@ import uuid
 import re
 from typing import Iterable, Dict, List, Optional, Tuple
 
-
-
-
 def save_current_state_as_temp_theme(
     theme_collection,
     tmp_name: str,
@@ -194,154 +191,6 @@ def collect_visible_layer_messages(root, log_layer_legend_state_func=None, tag: 
                 pass
 
     return messages
-
-
-def collect_visible_layer_messages_from_theme(
-    theme_or_name,
-    theme_collection=None,
-    project=None,
-    log_layer_legend_state_func=None,
-    tag: str = "GEO-search-plugin",
-):
-    """Collect and emit visible-layer messages from a saved theme.
-
-    Parameters:
-    - theme_or_name: either a theme object or a theme name (str).
-    - theme_collection: required when ``theme_or_name`` is a name so the
-      theme object can be retrieved from the collection.
-    - project: optional `QgsProject` instance; if not provided the function
-      will try to obtain `QgsProject.instance()`.
-    - log_layer_legend_state_func: optional callable(layer, tag=...) to
-      emit per-layer legend-state logs (same as in
-      `collect_visible_layer_messages`).
-
-    The function returns the list of message strings that were emitted.
-    """
-    messages = []
-
-    # Resolve theme object if a name is provided
-    theme = None
-    if isinstance(theme_or_name, str):
-        if theme_collection is None:
-            return ["[テーマログ] theme_collection が指定されていません"]
-        for getter in ("mapTheme", "theme", "getMapTheme", "getTheme", "mapThemeByName", "themeByName"):
-            if hasattr(theme_collection, getter):
-                try:
-                    theme = getattr(theme_collection, getter)(theme_or_name)
-                    break
-                except Exception:
-                    continue
-        if theme is None:
-            # Try dictionary-like access as a last resort
-            try:
-                theme = getattr(theme_collection, "__getitem__", None) and theme_collection[theme_or_name]
-            except Exception:
-                theme = None
-    else:
-        theme = theme_or_name
-
-    if theme is None:
-        return ["[テーマログ] 指定したテーマオブジェクトが見つかりませんでした"]
-
-    # Try to extract layer id list from theme object via common attribute names
-    layer_ids = None
-    for attr in ("layerIds", "layers", "layer_ids", "layerIdsList", "layersList"):
-        try:
-            val = getattr(theme, attr, None)
-            if val is None:
-                continue
-            maybe = val() if callable(val) else val
-            if isinstance(maybe, (list, tuple, set)):
-                layer_ids = list(maybe)
-                break
-        except Exception:
-            continue
-
-    # If theme is dict-like, try some keys
-    if layer_ids is None:
-        try:
-            if isinstance(theme, dict):
-                if "layerIds" in theme and isinstance(theme["layerIds"], (list, tuple, set)):
-                    layer_ids = list(theme["layerIds"])
-                else:
-                    # fallback to keys if they look like ids
-                    layer_ids = [k for k in theme.keys()]
-        except Exception:
-            layer_ids = None
-
-    if not layer_ids:
-        return ["[テーマログ] テーマからレイヤIDを取得できませんでした"]
-
-    # Resolve project instance
-    if project is None:
-        try:
-            from qgis.core import QgsProject
-        except Exception:
-            QgsProject = None
-        if QgsProject is not None:
-            try:
-                project = QgsProject.instance()
-            except Exception:
-                project = None
-
-    order = 0
-    for lid in layer_ids:
-        try:
-            layer = None
-            if project is not None:
-                try:
-                    # preferred API
-                    layer = project.mapLayer(lid)
-                except Exception:
-                    try:
-                        layers_map = project.mapLayers()
-                        layer = layers_map.get(lid) if isinstance(layers_map, dict) else None
-                    except Exception:
-                        layer = None
-
-            lname = None
-            if layer is not None:
-                try:
-                    lname = layer.name()
-                except Exception:
-                    lname = getattr(layer, "name", None) or None
-
-            messages.append(f"[テーマログ][visible_layer] order={order} id={lid} name='{lname}'")
-            if log_layer_legend_state_func is not None and layer is not None:
-                try:
-                    log_layer_legend_state_func(layer, tag=tag)
-                except Exception:
-                    pass
-            order += 1
-        except Exception:
-            continue
-
-    # Emit messages using QgsMessageLog when available, otherwise print
-    try:
-        from qgis.core import QgsMessageLog
-    except Exception:
-        QgsMessageLog = None
-
-    for m in messages:
-        try:
-            if QgsMessageLog is not None:
-                try:
-                    QgsMessageLog.logMessage(m, tag, 0)
-                except Exception:
-                    print(m)
-            else:
-                print(m)
-        except Exception:
-            try:
-                print(m)
-            except Exception:
-                pass
-
-    return messages
-
-
-
-
 
 def restore_temp_theme(theme_collection, tmp_name: str, root=None, model=None, log_func=None, short_func=None):
     """Apply (restore) a temporary theme by name without removing it.
@@ -694,33 +543,6 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                 except Exception:
                     pass
 
-            # 選択テーマ（tmp_sel）からのログ出力: 保存されたテーマの内容を確認
-            try:
-                if sel_saved:
-                    try:
-                        # obtain project instance if available
-                        proj = None
-                        if QgsProject is not None:
-                            try:
-                                proj = QgsProject.instance()
-                            except Exception:
-                                proj = None
-                        collect_visible_layer_messages_from_theme(
-                            tmp_sel, theme_collection=theme_collection, project=proj, log_layer_legend_state_func=log_layer_legend_state
-                        )
-                    except Exception:
-                        try:
-                            _log("[テーマログ本番] sel temp からのログ出力に失敗しました", 2)
-                        except Exception:
-                            pass
-            except Exception:
-                try:
-                    _log("[テーマログ本番] sel temp のログ出力処理で例外が発生しました", 2)
-                except Exception:
-                    pass
-
-
-
             # 選択テーマとして保存した一時テーマは適用しないで削除する
             try:
                 if sel_saved:
@@ -730,7 +552,6 @@ def apply_theme(theme_collection, theme_name: str, root, model, additive: bool =
                     _log("[テーマログ] sel temp の削除で例外が発生しました", 2)
                 except Exception:
                     pass
-        # 追加表示の実装はまだ行わない
         return
 
     # 非 additivemode: 通常適用
