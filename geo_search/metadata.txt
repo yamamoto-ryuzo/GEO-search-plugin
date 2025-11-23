@@ -1,10 +1,9 @@
 [general]
+
 name=geo_search
 qgisMinimumVersion=3.00
 qgisMaximumVersion=3.99
-description=Layer Geo Search
-about=Retrieves cadastral lot ("tiban") information and associated layer attributes from QGIS layers, files, or databases (e.g. PostGIS). Supports lot-number, owner-name and general attribute searches; displays results in per-layer tabs with configurable display fields, pagination, and optional map-theme application. Qt5/Qt6 compatible. Supports map-theme selection via the `selectTheme` setting (use "検索前" to restore the saved view). A toolbar "additive display" toggle is provided to overlay theme-visible layers on top of currently visible layers instead of replacing them.（`selectTheme` によるテーマ適用、'検索前' の復元、ツールバーの「追加表示」トグルに対応）
-version=3.1.3
+version=3.1.4
 author=yamamotoryuzo
 email=ryu@yamakun.net
 tracker=https://github.com/yamamoto-ryuzo/GEO-search-plugin
@@ -13,3 +12,9 @@ homepage=https://github.com/yamamoto-ryuzo/GEO-search-plugin
 icon=icon/qgis-icon.png
 category=Plugins
 supportsQt6=True
+
+# --- Description (English & Japanese) ---
+description=Advanced map search system for QGIS. Supports cadastral lot ("tiban"), owner name, and general attribute search. Results are shown in per-layer tabs with configurable display fields, paging, and map theme switching. Includes a UI for per-tab settings, theme selection ("selectTheme"), and an "additive display" mode to overlay search results. Compatible with QGIS 3.x, Qt5/Qt6.\n\nQGIS用の地図検索システム。地番・所有者名・属性検索に対応し、結果はレイヤごとにタブ表示・ページング・表示フィールド選択が可能。タブごとの設定編集UI、マップテーマ切替（selectTheme）、追加表示モード（既存表示に重ねて検索結果を表示）を搭載。QGIS 3.x/Qt5/Qt6対応。
+
+# --- About (detailed, multi-language) ---
+about=This plugin enables advanced map search in QGIS projects: lot-number, owner-name, and attribute-based search, with results shown in per-layer tabs. Features include:\n- Per-tab configurable search fields and display fields (UI editable)\n- Supports QGIS layers, files, and PostGIS databases\n- Paging for large results\n- Map theme switching per search (selectTheme, including "検索前" for restoring previous view)\n- Additive display mode: overlay search results on current map\n- Qt5/Qt6 compatible, QGIS 3.x supported\n- Japanese/English UI and documentation\n\nQGISプロジェクト内で地番・所有者名・属性による検索を実現。\n- タブごとに検索・表示フィールドを設定可能（UIで編集可）\n- QGISレイヤ・ファイル・PostGIS対応\n- 大量データもページング表示\n- 検索時にマップテーマ切替（selectTheme、検索前復元対応）\n- 追加表示モードで既存表示に重ねて検索結果を表示\n- Qt5/Qt6両対応、QGIS 3.x対応\n- 日本語・英語UI/ドキュメント
