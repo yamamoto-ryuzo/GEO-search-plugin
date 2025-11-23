@@ -978,7 +978,7 @@ def list_visible_layer_snapshots() -> List[str]:
         return []
 
 
-def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None):
+def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None, overwrite_all: bool = False):
     """Apply visible-only legend flags from `legend_state` to `layer`.
 
     Only sets items to visible (enables); does not disable any existing items.
@@ -999,29 +999,29 @@ def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None):
     if not items:
         return
 
-    def _enable_obj(obj):
+    def _set_obj_state(obj, enable: bool):
         try:
             if hasattr(obj, 'setActive'):
                 try:
-                    obj.setActive(True)
+                    obj.setActive(bool(enable))
                     return True
                 except Exception:
                     pass
             if hasattr(obj, 'setEnabled'):
                 try:
-                    obj.setEnabled(True)
+                    obj.setEnabled(bool(enable))
                     return True
                 except Exception:
                     pass
             if hasattr(obj, 'setVisible'):
                 try:
-                    obj.setVisible(True)
+                    obj.setVisible(bool(enable))
                     return True
                 except Exception:
                     pass
             if hasattr(obj, 'setRenderState'):
                 try:
-                    obj.setRenderState(True)
+                    obj.setRenderState(bool(enable))
                     return True
                 except Exception:
                     pass
@@ -1038,10 +1038,12 @@ def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None):
             except Exception:
                 categories = []
             for it in items:
-                if it.get('visible') is not True:
-                    continue
                 label = it.get('label')
                 if label is None:
+                    continue
+                desired = True if it.get('visible') is True else False
+                # If not overwrite_all, we only enable True items
+                if not overwrite_all and not desired:
                     continue
                 for cat in categories:
                     try:
@@ -1049,7 +1051,7 @@ def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None):
                     except Exception:
                         lab = None
                     if lab == label:
-                        _enable_obj(cat)
+                        _set_obj_state(cat, desired)
             # done
     except Exception:
         pass
@@ -1063,10 +1065,11 @@ def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None):
             except Exception:
                 ranges = []
             for it in items:
-                if it.get('visible') is not True:
-                    continue
                 label = it.get('label')
                 if label is None:
+                    continue
+                desired = True if it.get('visible') is True else False
+                if not overwrite_all and not desired:
                     continue
                 for r in ranges:
                     try:
@@ -1074,7 +1077,7 @@ def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None):
                     except Exception:
                         lab = None
                     if lab == label:
-                        _enable_obj(r)
+                        _set_obj_state(r, desired)
     except Exception:
         pass
 
@@ -1107,10 +1110,11 @@ def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None):
                 all_rules = []
 
         for it in items:
-            if it.get('visible') is not True:
-                continue
             label = it.get('label')
             if label is None:
+                continue
+            desired = True if it.get('visible') is True else False
+            if not overwrite_all and not desired:
                 continue
             for r in all_rules:
                 try:
@@ -1118,7 +1122,7 @@ def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None):
                 except Exception:
                     lab = None
                 if lab == label:
-                    _enable_obj(r)
+                    _set_obj_state(r, desired)
     except Exception:
         pass
 
@@ -1251,6 +1255,29 @@ def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, ta
 
                     if node is not None:
                         node_found = True
+                        # Detect original node visibility before we change it
+                        orig_node_visible = None
+                        try:
+                            vis_getters = ('isVisible', 'isItemVisibilityChecked', 'isChecked', 'visible', 'checked')
+                            for g in vis_getters:
+                                try:
+                                    getter = getattr(node, g, None)
+                                    if callable(getter):
+                                        try:
+                                            val = getter()
+                                            orig_node_visible = bool(val)
+                                            break
+                                        except Exception:
+                                            continue
+                                    else:
+                                        val = getattr(node, g, None)
+                                        if isinstance(val, bool):
+                                            orig_node_visible = val
+                                            break
+                                except Exception:
+                                    continue
+                        except Exception:
+                            orig_node_visible = None
                         # First: ensure parent groups are visible so the layer can actually show
                         try:
                             parent = getattr(node, 'parent', None)
@@ -1302,7 +1329,9 @@ def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, ta
                                     pass
                         except Exception:
                             pass
-                        # Apply legend visibility (only enable visible items)
+                        # Apply legend visibility. If the node was originally non-visible
+                        # then overwrite items state (enable/disable) to reproduce legend;
+                        # otherwise only enable visible items.
                         try:
                             try:
                                 legend_state = rec.get('legend')
@@ -1310,7 +1339,8 @@ def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, ta
                                 legend_state = None
                             if legend_state:
                                 try:
-                                    apply_legend_visibility(layer, legend_state, log_func=_logmsg)
+                                    overwrite = not bool(orig_node_visible)
+                                    apply_legend_visibility(layer, legend_state, log_func=_logmsg, overwrite_all=overwrite)
                                 except Exception:
                                     pass
                         except Exception:
