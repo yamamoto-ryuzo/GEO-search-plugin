@@ -1103,7 +1103,42 @@ def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, ta
 
                     if node is not None:
                         node_found = True
-                        # Try several visibility setters
+                        # First: ensure parent groups are visible so the layer can actually show
+                        try:
+                            parent = getattr(node, 'parent', None)
+                            # parent may be a callable or attribute depending on API
+                            try:
+                                parent_node = parent() if callable(parent) else parent
+                            except Exception:
+                                parent_node = None
+                            # Walk upward and set visibility on groups
+                            while parent_node is not None:
+                                try:
+                                    # set visibility on parent node using multiple possible APIs
+                                    if hasattr(parent_node, 'setItemVisibilityChecked'):
+                                        parent_node.setItemVisibilityChecked(True)
+                                    elif hasattr(parent_node, 'setVisible'):
+                                        parent_node.setVisible(True)
+                                    elif hasattr(parent_node, 'setIsVisible'):
+                                        parent_node.setIsVisible(True)
+                                    else:
+                                        try:
+                                            setattr(parent_node, 'visible', True)
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+                                # move up
+                                try:
+                                    up = getattr(parent_node, 'parent', None)
+                                    parent_node = up() if callable(up) else up
+                                except Exception:
+                                    break
+
+                        except Exception:
+                            pass
+
+                        # Try several visibility setters on the layer node itself
                         try:
                             if hasattr(node, 'setItemVisibilityChecked'):
                                 node.setItemVisibilityChecked(True)
