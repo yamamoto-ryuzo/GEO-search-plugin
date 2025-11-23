@@ -799,8 +799,23 @@ def _save_categorized_renderer_state(renderer):
             label = cat.label() if callable(getattr(cat, 'label', None)) else getattr(cat, 'label', None)
         except Exception:
             label = getattr(cat, 'label', None)
-        visible = _call_bool_methods(cat, ('renderState', 'isVisible', 'active'))
-        items.append({'index': i, 'type': 'category', 'label': label, 'visible': visible})
+        try:
+            val = cat.value() if callable(getattr(cat, 'value', None)) else getattr(cat, 'value', None)
+        except Exception:
+            val = getattr(cat, 'value', None)
+        visible = None
+        try:
+            # Prefer explicit renderState API when available
+            if callable(getattr(cat, 'renderState', None)):
+                try:
+                    visible = bool(cat.renderState())
+                except Exception:
+                    visible = None
+        except Exception:
+            visible = None
+        if visible is None:
+            visible = _call_bool_methods(cat, ('renderState', 'isVisible', 'active'))
+        items.append({'index': i, 'type': 'category', 'label': label, 'value': val, 'visible': visible})
     return items
 
 
@@ -854,41 +869,198 @@ def _save_single_renderer_state(renderer, layer_name=None):
     return items
 
 
-def _apply_categorized_visibility(renderer, items, overwrite_all=False, log_func=None):
+def _apply_categorized_visibility(layer, items, overwrite_all=False, log_func=None):
+    """Apply categorized renderer visibility by rebuilding renderer when possible.
+
+    This prefers the approach in the user's example: update category renderState
+    by value and create a new QgsCategorizedSymbolRenderer with the modified
+    categories, then set it on the layer and trigger repaint. If the
+    QgsCategorizedSymbolRenderer class is not available, best-effort in-place
+    updates are performed.
+    """
+    if layer is None:
+        return
+
     try:
-        cats_fn = getattr(renderer, 'categories', None)
-        if not callable(cats_fn):
-            return
+        renderer = layer.renderer()
+    except Exception:
+        renderer = None
+    if renderer is None:
+        return
+
+    # Build a mapping of category value -> desired visible state when available
+    mapping = {}
+    for it in items:
+        if 'value' in it:
+            mapping[it['value']] = bool(it.get('visible') is True)
+        elif 'label' in it:
+            mapping[it['label']] = bool(it.get('visible') is True)
+
+    try:
+        # Try to import categorized renderer class for robust isinstance checks
         try:
-            categories = renderer.categories()
+            from qgis.core import QgsCategorizedSymbolRenderer
         except Exception:
-            categories = []
-        for it in items:
-            label = it.get('label')
-            if label is None:
-                continue
-            desired = True if it.get('visible') is True else False
-            if not overwrite_all and not desired:
-                continue
+            QgsCategorizedSymbolRenderer = None
+
+        type_name = None
+        try:
+            t = renderer.type()
+            if isinstance(t, str):
+                type_name = t
+        except Exception:
+            type_name = None
+
+        is_categorized = False
+        if QgsCategorizedSymbolRenderer is not None and isinstance(renderer, QgsCategorizedSymbolRenderer):
+            is_categorized = True
+        elif type_name == 'categorizedSymbol' or type(renderer).__name__ == 'QgsCategorizedSymbolRenderer':
+            is_categorized = True
+
+        if is_categorized:
+            # Retrieve classification attribute and categories
+            try:
+                attr = renderer.classAttribute() if callable(getattr(renderer, 'classAttribute', None)) else getattr(renderer, 'classAttribute', None)
+            except Exception:
+                attr = None
+            try:
+                categories = renderer.categories()
+            except Exception:
+                categories = []
+
+            new_categories = []
+            modified_any = False
+
+            # Read current renderer visibility for each existing category
+            current_map = {}
             for cat in categories:
                 try:
-                    lab = cat.label() if callable(getattr(cat, 'label', None)) else getattr(cat, 'label', None)
+                    val = cat.value() if callable(getattr(cat, 'value', None)) else getattr(cat, 'value', None)
                 except Exception:
-                    lab = None
-                if lab == label:
+                    val = getattr(cat, 'value', None)
+                cur_vis = None
+                try:
+                    if callable(getattr(cat, 'renderState', None)):
+                        cur_vis = bool(cat.renderState())
+                except Exception:
+                    cur_vis = None
+                if cur_vis is None:
+                    cur_vis = _call_bool_methods(cat, ('renderState', 'isVisible', 'active'))
+                current_map[val] = cur_vis
+                try:
+                    current_map[str(val)] = cur_vis
+                except Exception:
+                    pass
+
+            # Compute union (additive) or overwrite per category, then apply
+            for cat in categories:
+                try:
+                    val = cat.value() if callable(getattr(cat, 'value', None)) else getattr(cat, 'value', None)
+                except Exception:
+                    val = getattr(cat, 'value', None)
+
+                # current visibility
+                cur_vis = current_map.get(val, None)
+                if cur_vis is None:
                     try:
-                        if hasattr(cat, 'setActive'):
-                            cat.setActive(bool(desired))
-                        elif hasattr(cat, 'setEnabled'):
-                            cat.setEnabled(bool(desired))
-                        elif hasattr(cat, 'setVisible'):
-                            cat.setVisible(bool(desired))
-                        elif hasattr(cat, 'setRenderState'):
-                            cat.setRenderState(bool(desired))
+                        cur_vis = current_map.get(str(val), None)
                     except Exception:
-                        continue
+                        cur_vis = None
+
+                # saved desired visibility (may be None)
+                saved_vis = None
+                if val in mapping:
+                    saved_vis = mapping.get(val)
+                else:
+                    try:
+                        saved_vis = mapping.get(str(val))
+                    except Exception:
+                        saved_vis = None
+
+                # Determine final desired state: union for additive mode, saved for overwrite
+                if overwrite_all:
+                    # If saved_vis is None, keep current; else use saved_vis
+                    if saved_vis is None:
+                        desired = cur_vis
+                    else:
+                        desired = bool(saved_vis)
+                else:
+                    # additive: enable when either current or saved is True
+                    desired = bool((cur_vis is True) or (saved_vis is True))
+
+                # Apply desired state to category via available setters
+                applied_state = False
+                try:
+                    if callable(getattr(cat, 'setRenderState', None)):
+                        try:
+                            cat.setRenderState(bool(desired))
+                            applied_state = True
+                        except Exception:
+                            applied_state = False
+                    if not applied_state and hasattr(cat, 'setActive'):
+                        try:
+                            cat.setActive(bool(desired))
+                            applied_state = True
+                        except Exception:
+                            applied_state = False
+                    if not applied_state and hasattr(cat, 'setEnabled'):
+                        try:
+                            cat.setEnabled(bool(desired))
+                            applied_state = True
+                        except Exception:
+                            applied_state = False
+                    if not applied_state and hasattr(cat, 'setVisible'):
+                        try:
+                            cat.setVisible(bool(desired))
+                            applied_state = True
+                        except Exception:
+                            applied_state = False
+                except Exception:
+                    applied_state = False
+
+                if applied_state:
+                    modified_any = True
+
+                new_categories.append(cat)
+
+            # After updating category objects, construct new renderer to ensure
+            # QGIS picks up the modified category objects (some QGIS versions
+            # require setting a new renderer instance to refresh internal state).
+            try:
+                from qgis.core import QgsCategorizedSymbolRenderer
+            except Exception:
+                QgsCategorizedSymbolRenderer = None
+
+            if QgsCategorizedSymbolRenderer is not None:
+                try:
+                    new_renderer = QgsCategorizedSymbolRenderer(attr, new_categories)
+                    try:
+                        layer.setRenderer(new_renderer)
+                    except Exception:
+                        try:
+                            layer.setRenderer(new_renderer)
+                        except Exception:
+                            pass
+                    try:
+                        layer.triggerRepaint()
+                    except Exception:
+                        pass
+                    return
+                except Exception:
+                    # If building new renderer failed, fall back to relying on
+                    # in-place modifications already applied to category objects.
+                    pass
+
+            # If we couldn't make a new renderer, at least trigger repaint
+            if modified_any:
+                try:
+                    layer.triggerRepaint()
+                except Exception:
+                    pass
+            return
     except Exception:
         pass
+
 
 
 def _apply_graduated_visibility(renderer, items, overwrite_all=False, log_func=None):
@@ -1340,7 +1512,7 @@ def apply_legend_visibility(layer, legend_state: Optional[Dict], log_func=None, 
 
     # Delegate renderer-specific visibility application to helpers
     try:
-        _apply_categorized_visibility(renderer, items, overwrite_all=overwrite_all, log_func=log_func)
+        _apply_categorized_visibility(layer, items, overwrite_all=overwrite_all, log_func=log_func)
     except Exception:
         pass
     try:
