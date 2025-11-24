@@ -217,15 +217,24 @@ class plugin(object):
 
                 # 設定用アイコン（実装は不要、表示のみ）
                 try:
-                    self.theme_button = QToolButton()
+                    self.setting_button = QToolButton()
                     icon_path = os.path.join(os.path.dirname(__file__), "icon", "setting.png")
                     try:
-                        self.theme_button.setIcon(QIcon(icon_path))
+                        self.setting_button.setIcon(QIcon(icon_path))
                     except Exception:
                         pass
-                    self.theme_button.setToolTip("テーマ設定")
-                    # 実装は不要のためシグナルは接続しない
-                    self.theme_layout.addWidget(self.theme_button)
+                    self.setting_button.setToolTip("テーマ設定")
+                    # 設定ダイアログを開く処理を接続
+                    try:
+                        self.setting_button.clicked.connect(self.open_settings_dialog)
+                    except Exception:
+                        pass
+                    try:
+                        self.setting_button.setEnabled(True)
+                        self.setting_button.setVisible(True)
+                    except Exception:
+                        pass
+                    self.theme_layout.addWidget(self.setting_button)
                 except Exception:
                     # fallback: 何もせずにコンボだけ追加
                     pass
@@ -758,6 +767,90 @@ class plugin(object):
             except Exception:
                 pass
 
+    def open_settings_dialog(self):
+        """ツールバーの設定ボタンから開くシンプルな設定ダイアログを表示します。
+
+        OK とキャンセルボタンを持ち、ユーザーの選択でダイアログを閉じます。
+        実際の設定項目はここに追加できます。
+        """
+        try:
+            # まずログに呼び出しを記録（QgsMessageLog または print）
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("open_settings_dialog invoked", "GEO-search-plugin", 0)
+            except Exception:
+                try:
+                    print("open_settings_dialog invoked")
+                except Exception:
+                    pass
+
+            import importlib
+            parent = None
+            try:
+                parent = self.iface.mainWindow()
+            except Exception:
+                parent = None
+
+            # 専用の SettingsDialog があればそちらを使う
+            try:
+                from .settingsdialog import SettingsDialog
+            except Exception:
+                SettingsDialog = None
+
+            if SettingsDialog is not None:
+                dlg = SettingsDialog(parent=parent, iface=self.iface)
+            else:
+                # フォールバック: シンプルな QDialog を生成
+                from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPushButton
+                dlg = QDialog(parent)
+                dlg.setWindowTitle("Settings")
+                dlg.setMinimumSize(400, 120)
+                layout = QVBoxLayout(dlg)
+                layout.addWidget(QLabel("Settings dialog: add options here.", dlg))
+                btn_layout = QHBoxLayout()
+                btn_layout.addStretch()
+                ok_btn = QPushButton("OK", dlg)
+                cancel_btn = QPushButton("Cancel", dlg)
+                ok_btn.clicked.connect(dlg.accept)
+                cancel_btn.clicked.connect(dlg.reject)
+                btn_layout.addWidget(ok_btn)
+                btn_layout.addWidget(cancel_btn)
+                layout.addLayout(btn_layout)
+
+            try:
+                qt_compat = importlib.import_module('geo_search.qt_compat')
+            except Exception:
+                qt_compat = None
+
+            if qt_compat is not None:
+                try:
+                    qt_compat.exec_dialog(dlg)
+                except Exception:
+                    try:
+                        dlg.exec_()
+                    except Exception:
+                        try:
+                            dlg.exec()
+                        except Exception:
+                            pass
+            else:
+                try:
+                    dlg.exec_()
+                except Exception:
+                    try:
+                        dlg.exec()
+                    except Exception:
+                        pass
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"open_settings_dialog error: {e}", "GEO-search-plugin", 2)
+            except Exception:
+                try:
+                    print(f"open_settings_dialog error: {e}")
+                except Exception:
+                    pass
+
     def _on_map_themes_changed(self, *args, **kwargs):
         """Wrapper for mapThemesChanged signal: log and delegate."""
         try:
@@ -843,20 +936,20 @@ class plugin(object):
                 self.theme_combobox.deleteLater()
                 self.theme_combobox = None
             # remove theme widget and button if present
-            if hasattr(self, 'theme_button') and self.theme_button is not None:
+            if hasattr(self, 'setting_button') and self.setting_button is not None:
                 try:
                     try:
-                        self.iface.removeToolBarWidget(self.theme_button)
+                        self.iface.removeToolBarWidget(self.setting_button)
                     except Exception:
                         pass
                 except Exception:
                     pass
                 try:
-                    self.theme_button.deleteLater()
+                    self.setting_button.deleteLater()
                 except Exception:
                     pass
                 try:
-                    self.theme_button = None
+                    self.setting_button = None
                 except Exception:
                     pass
             if hasattr(self, 'theme_widget') and self.theme_widget is not None:
