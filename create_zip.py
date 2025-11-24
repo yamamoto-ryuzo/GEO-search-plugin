@@ -13,6 +13,45 @@ DEFAULT_EXCLUDES = [
 ]
 
 
+def read_gitignore_files(src_dir: str):
+    """Read .gitignore from the source directory and repository root.
+    Return list of patterns (simple, trimmed) to add to excludes.
+    """
+    patterns = []
+    candidates = [os.path.join(src_dir, '.gitignore'), os.path.join('.', '.gitignore')]
+    seen = set()
+    for p in candidates:
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        pat = line
+                        # normalize leading slash (we'll treat patterns as relative to src_dir)
+                        if pat.startswith('/'):
+                            pat = pat.lstrip('/')
+                        # directory pattern ending with '/'
+                        if pat.endswith('/'):
+                            pat = pat.rstrip('/')
+                            if pat and pat not in seen:
+                                patterns.append(pat)
+                                seen.add(pat)
+                            sub = pat + '/*'
+                            if sub not in seen:
+                                patterns.append(sub)
+                                seen.add(sub)
+                        else:
+                            if pat not in seen:
+                                patterns.append(pat)
+                                seen.add(pat)
+            except Exception:
+                # don't fail packaging if gitignore can't be read
+                pass
+    return patterns
+
+
 def find_metadata(src_hint: str = None):
     """Search for metadata.txt. If src_hint is provided and contains metadata.txt use it.
     Returns absolute path to metadata and the folder containing it.
@@ -146,6 +185,12 @@ def main():
 
     # assemble exclude list
     excludes = list(DEFAULT_EXCLUDES)
+    # add patterns from .gitignore (src folder and repo root)
+    try:
+        gitignore_patterns = read_gitignore_files(src_dir)
+    except Exception:
+        gitignore_patterns = []
+    excludes.extend(gitignore_patterns)
     # user provided excludes override or extend
     if args.exclude:
         excludes.extend(args.exclude)
