@@ -2024,6 +2024,196 @@ def collect_visible_layer_reload(snapshot_name: str, project=None, root=None, ta
     return True
 
 
+# --- User-theme: JSON ベースの最小限テーマ保存/読込/適用 ------------------------------
+import json
+from datetime import datetime
+
+
+def save_user_theme(path: str, snapshot=None, project=None, root=None):
+    """
+    Save a minimal "user theme" as JSON containing layer order/id/name,
+    optional style name and legend visible items.
+
+    Returns True on success, False on failure.
+    """
+    try:
+        from qgis.core import QgsProject, QgsMessageLog
+        project = project or QgsProject.instance()
+        root = root or (project.layerTreeRoot() if hasattr(project, "layerTreeRoot") else None)
+    except Exception:
+        project = project
+        root = root
+
+    if snapshot is None:
+        try:
+            snapshot_msgs = collect_visible_layer_snapshot(root)
+            # collect_visible_layer_snapshot returns messages; use in-memory snapshot if set
+            # Instead, call collect_visible_layer_snapshot with no snapshot_name and then read
+            snapshot = get_visible_layer_snapshot(None) or []
+        except Exception:
+            snapshot = []
+
+    # Build minimal entries
+    entries = []
+    for e in (snapshot or []):
+        entry = {
+            "order": e.get("order"),
+            "id": e.get("id"),
+            "name": e.get("name"),
+            "style": e.get("style"),
+            "legend_items": []
+        }
+        legend = e.get("legend") or {}
+        items = legend.get("items") if isinstance(legend, dict) else None
+        if items:
+            for it in items:
+                entry["legend_items"].append({
+                    "label": it.get("label"),
+                    "visible": bool(it.get("visible"))
+                })
+        entries.append(entry)
+
+    payload = {
+        "meta": {
+            "version": 1,
+            "qgis_version": "",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "project": (getattr(project, "fileName", lambda: "")() if project is not None else "")
+        },
+        "entries": entries,
+    }
+
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"Saved user theme to {path}", 'GEO-search-plugin', 0)
+        except Exception:
+            pass
+        return True
+    except Exception as ex:
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"Failed to save user theme to {path}: {ex}", 'GEO-search-plugin', 2)
+        except Exception:
+            pass
+        return False
+
+
+def load_user_theme(path: str):
+    """
+    Load a user-theme JSON file and return the parsed dict or None on error.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data
+    except Exception:
+        try:
+            from qgis.core import QgsMessageLog
+            QgsMessageLog.logMessage(f"Failed to load user theme from {path}", 'GEO-search-plugin', 2)
+        except Exception:
+            pass
+        return None
+
+
+def apply_user_theme(data: dict, overwrite_legend: bool = False, project=None, log_func=None):
+    """
+    Apply a loaded user-theme dict to the current project.
+    - Lookup layers by id first, fallback to name.
+    - Try to apply saved style name via `_apply_layer_style_by_name`.
+    - Apply legend visibility via `apply_legend_visibility` (best-effort).
+
+    Returns list of applied layer names.
+    """
+    try:
+        from qgis.core import QgsProject, QgsMessageLog
+        project = project or QgsProject.instance()
+    except Exception:
+        project = project
+
+    applied = []
+    if not data or "entries" not in data:
+        return applied
+
+    # Build name->layers map for name-based fallback
+    try:
+        layers_map = {}
+        all_layers = project.mapLayers() if project is not None and hasattr(project, 'mapLayers') else {}
+        for lid, layer in (all_layers or {}).items():
+            try:
+                layers_map.setdefault(layer.name(), []).append(layer)
+            except Exception:
+                continue
+    except Exception:
+        layers_map = {}
+
+    for entry in data.get("entries", []):
+        layer = None
+        lid = entry.get("id")
+        name = entry.get("name")
+        # Try id lookup
+        try:
+            if lid and project is not None:
+                if hasattr(project, 'mapLayer'):
+                    layer = project.mapLayer(lid)
+                elif hasattr(project, 'mapLayerById'):
+                    layer = project.mapLayerById(lid)
+        except Exception:
+            layer = None
+        # Fallback to name
+        if layer is None and name:
+            cand = layers_map.get(name) or []
+            if cand:
+                layer = cand[0]
+
+        if layer is None:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"User theme: layer not found: id={lid} name={name}", 'GEO-search-plugin', 1)
+            except Exception:
+                pass
+            continue
+
+        # Apply style name if present
+        style_name = entry.get('style')
+        if style_name:
+            try:
+                _apply_layer_style_by_name(layer, style_name, log_func=(log_func or (lambda m, l: None)))
+            except Exception:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Failed to apply style '{style_name}' to layer '{layer.name()}'", 'GEO-search-plugin', 1)
+                except Exception:
+                    pass
+
+        # Apply legend items
+        legend_items = entry.get('legend_items') or []
+        if legend_items:
+            legend_state = {"items": [{"label": it.get("label"), "visible": bool(it.get("visible"))} for it in legend_items]}
+            try:
+                apply_legend_visibility(layer, legend_state, overwrite_all=bool(overwrite_legend))
+            except Exception:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Failed to apply legend state to '{layer.name()}'", 'GEO-search-plugin', 1)
+                except Exception:
+                    pass
+
+        try:
+            applied.append(layer.name())
+        except Exception:
+            applied.append(name or str(lid))
+
+    try:
+        from qgis.core import QgsMessageLog
+        QgsMessageLog.logMessage(f"User theme applied to layers: {applied}", 'GEO-search-plugin', 0)
+    except Exception:
+        pass
+    return applied
+
+
 __all__ = [
     "apply_theme",
     "_get_theme_brackets",
@@ -2035,4 +2225,7 @@ __all__ = [
     "get_visible_layer_snapshot",
     "list_visible_layer_snapshots",
     "collect_visible_layer_reload",
+    "save_user_theme",
+    "load_user_theme",
+    "apply_user_theme",
 ]
