@@ -7,7 +7,7 @@ import json
 import os
 
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QMessageBox, QComboBox
+from qgis.PyQt.QtWidgets import QAction, QMessageBox, QComboBox, QWidget, QToolButton, QHBoxLayout
 from qgis.core import (
     QgsProject,
     QgsExpressionContextUtils,
@@ -192,7 +192,77 @@ class plugin(object):
         self.theme_combobox = QComboBox()
         self.theme_combobox.setToolTip("レイヤの表示/非表示を設定するマップテーマを選択（「テーマ選択」で基本表示に戻す）")
         self.theme_combobox.setMinimumWidth(180)
-        self.iface.addToolBarWidget(self.theme_combobox)
+
+        # テーマ選択の右側に設定アイコンを表示するためのコンテナウィジェットを作成
+        try:
+            # 再ロード時に重複して追加しないよう既存の widget を流用する
+            if not hasattr(self, 'theme_widget') or self.theme_widget is None:
+                self.theme_widget = QWidget()
+                self.theme_layout = QHBoxLayout()
+                # マージンを無くしてツールバーに馴染ませる
+                try:
+                    self.theme_layout.setContentsMargins(0, 0, 0, 0)
+                except Exception:
+                    pass
+                try:
+                    self.theme_layout.setSpacing(4)
+                except Exception:
+                    pass
+                self.theme_widget.setLayout(self.theme_layout)
+                # add combobox to layout
+                try:
+                    self.theme_layout.addWidget(self.theme_combobox)
+                except Exception:
+                    pass
+
+                # 設定用アイコン（実装は不要、表示のみ）
+                try:
+                    self.theme_button = QToolButton()
+                    icon_path = os.path.join(os.path.dirname(__file__), "icon", "setting.png")
+                    try:
+                        self.theme_button.setIcon(QIcon(icon_path))
+                    except Exception:
+                        pass
+                    self.theme_button.setToolTip("テーマ設定")
+                    # 実装は不要のためシグナルは接続しない
+                    self.theme_layout.addWidget(self.theme_button)
+                except Exception:
+                    # fallback: 何もせずにコンボだけ追加
+                    pass
+
+                # ツールバーにはコンテナを追加
+                try:
+                    self.iface.addToolBarWidget(self.theme_widget)
+                except Exception:
+                    # fallback to adding combobox directly
+                    try:
+                        self.iface.addToolBarWidget(self.theme_combobox)
+                    except Exception:
+                        pass
+            else:
+                # 既に widget が存在する場合は再追加を行わない。
+                # ただし古い状態で combobox が別の親にいる可能性があるため
+                # layout に含まれていなければ追加しておく。
+                try:
+                    if hasattr(self, 'theme_layout') and self.theme_layout is not None:
+                        # combobox が既に layout に属しているか簡易チェック
+                        try:
+                            parent = self.theme_combobox.parent()
+                        except Exception:
+                            parent = None
+                        try:
+                            if parent is not self.theme_widget:
+                                self.theme_layout.addWidget(self.theme_combobox)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            # 保守的に元の方法で追加
+            try:
+                self.iface.addToolBarWidget(self.theme_combobox)
+            except Exception:
+                pass
 
         self._theme_additive_mode = False
 
@@ -772,6 +842,39 @@ class plugin(object):
             if hasattr(self, 'theme_combobox'):
                 self.theme_combobox.deleteLater()
                 self.theme_combobox = None
+            # remove theme widget and button if present
+            if hasattr(self, 'theme_button') and self.theme_button is not None:
+                try:
+                    try:
+                        self.iface.removeToolBarWidget(self.theme_button)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                try:
+                    self.theme_button.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    self.theme_button = None
+                except Exception:
+                    pass
+            if hasattr(self, 'theme_widget') and self.theme_widget is not None:
+                try:
+                    try:
+                        self.iface.removeToolBarWidget(self.theme_widget)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                try:
+                    self.theme_widget.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    self.theme_widget = None
+                except Exception:
+                    pass
             if hasattr(self, 'group_combobox'):
                 try:
                     self.group_combobox.deleteLater()
