@@ -438,38 +438,60 @@ class ResultDialog(QDialog):
             except Exception:
                 return
 
-            # populate left list with first-field values (or fid fallback)
-            self._form_feature_map = []
-            try:
-                from qgis.PyQt.QtWidgets import QListWidgetItem
-            except Exception:
-                QListWidgetItem = None
-            for feat in features:
+            # prepare combos if present
+            table_combo = getattr(self, 'formTableCombo', None)
+            column_combo = getattr(self, 'formColumnCombo', None)
+            top_combo = getattr(self, 'formAttributeCombo', None)
+
+            # helper to populate left list given a field name and feature list
+            def _populate_left_for_field(field_name, feats=None):
+                if feats is None:
+                    feats = features
+                self._form_feature_map = []
                 try:
-                    if first_field_name:
-                        try:
-                            v = feat.attribute(first_field_name)
-                        except Exception:
+                    from qgis.PyQt.QtWidgets import QListWidgetItem
+                except Exception:
+                    QListWidgetItem = None
+                try:
+                    list_widget.clear()
+                except Exception:
+                    pass
+                for feat in (feats or []):
+                    try:
+                        if field_name:
                             try:
-                                v = feat[first_field_name]
+                                v = feat.attribute(field_name)
+                            except Exception:
+                                try:
+                                    v = feat[field_name]
+                                except Exception:
+                                    v = ''
+                        else:
+                            try:
+                                v = feat.id()
                             except Exception:
                                 v = ''
-                    else:
-                        # fallback: use feature id
                         try:
-                            v = feat.id()
+                            if QListWidgetItem is not None:
+                                item = QListWidgetItem(str(v))
+                                try:
+                                    item.setData(self.data_role, feat.id())
+                                except Exception:
+                                    pass
+                                list_widget.addItem(item)
+                            else:
+                                list_widget.addItem(str(v))
                         except Exception:
-                            v = ''
-                    item = QListWidgetItem(str(v))
-                    # store feature id for potential use
-                    try:
-                        item.setData(self.data_role, feat.id())
+                            try:
+                                list_widget.addItem(str(v))
+                            except Exception:
+                                pass
+                        self._form_feature_map.append(feat)
                     except Exception:
-                        pass
-                    list_widget.addItem(item)
-                    self._form_feature_map.append(feat)
-                except Exception:
-                    continue
+                        continue
+
+            # initially populate with the first_field_name
+            _populate_left_for_field(first_field_name, features)
 
             # connect selection -> show attributes of selected feature
             def _on_select():
@@ -529,6 +551,127 @@ class ResultDialog(QDialog):
                         pass
 
             list_widget.currentRowChanged.connect(lambda _: _on_select())
+
+            # wire column_combo to update left list when available
+            try:
+                if column_combo is not None:
+                    def _on_column(idx):
+                        try:
+                            if idx < 0:
+                                return
+                            try:
+                                col = column_combo.itemText(idx)
+                            except Exception:
+                                col = None
+                            if col:
+                                _populate_left_for_field(col, self._form_feature_map or features)
+                        except Exception:
+                            pass
+                    column_combo.currentIndexChanged.connect(_on_column)
+            except Exception:
+                pass
+
+            # wire table_combo to switch feature set and refresh column list
+            try:
+                if table_combo is not None:
+                    try:
+                        table_combo.clear()
+                        for t in self._form_tabs:
+                            layer = t.get('layer')
+                            try:
+                                name = layer.name() if layer is not None else self.tr('Results')
+                            except Exception:
+                                name = str(layer)
+                            table_combo.addItem(str(name))
+
+                        def _on_table(idx):
+                            try:
+                                if idx < 0 or idx >= len(self._form_tabs):
+                                    return
+                                sel = self._form_tabs[idx]
+                                feats = sel.get('features') or []
+                                flds = sel.get('fields') or []
+                                # populate column combo
+                                if column_combo is not None:
+                                    try:
+                                        column_combo.clear()
+                                        cols = [f.name() if hasattr(f, 'name') else str(f) for f in flds]
+                                        for c in cols:
+                                            column_combo.addItem(str(c))
+                                    except Exception:
+                                        pass
+                                # repopulate left using first column or fid
+                                try:
+                                    if flds:
+                                        first = flds[0].name() if hasattr(flds[0], 'name') else str(flds[0])
+                                        _populate_left_for_field(first, feats)
+                                    else:
+                                        _populate_left_for_field(None, feats)
+                                except Exception:
+                                    _populate_left_for_field(None, feats)
+                            except Exception:
+                                pass
+
+                        table_combo.currentIndexChanged.connect(_on_table)
+                        if table_combo.count() > 0:
+                            table_combo.setCurrentIndex(0)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # wire top-level attribute combo to mirror column choices if present
+            try:
+                if top_combo is not None:
+                    try:
+                        # if column_combo exists, copy its items
+                        top_combo.clear()
+                        cols = []
+                        try:
+                            if column_combo is not None and column_combo.count() > 0:
+                                for i in range(column_combo.count()):
+                                    top_combo.addItem(column_combo.itemText(i))
+                            else:
+                                # derive from fields
+                                if fields:
+                                    for f in fields:
+                                        name = f.name() if hasattr(f, 'name') else (f.displayName() if hasattr(f, 'displayName') else str(f))
+                                        top_combo.addItem(str(name))
+                        except Exception:
+                            pass
+                        try:
+                            top_combo.setVisible(True)
+                        except Exception:
+                            pass
+                        def _on_top(idx):
+                            try:
+                                if idx < 0:
+                                    return
+                                try:
+                                    name = top_combo.itemText(idx)
+                                except Exception:
+                                    name = None
+                                if name and column_combo is not None:
+                                    # find same name in column_combo
+                                    try:
+                                        for i in range(column_combo.count()):
+                                            if column_combo.itemText(i) == name:
+                                                column_combo.setCurrentIndex(i)
+                                                return
+                                    except Exception:
+                                        pass
+                                    # fallback: directly populate left
+                                _populate_left_for_field(name)
+                            except Exception:
+                                pass
+                        try:
+                            top_combo.currentIndexChanged.connect(_on_top)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             # clear existing tabs and insert the container as a single tab
             try:
