@@ -95,6 +95,13 @@
      </property>
     </widget>
    </item>
+    <item row="2" column="4">
+     <widget class="QPushButton" name="modeToggleButton">
+      <property name="text">
+        <string>Form</string>
+      </property>
+     </widget>
+    </item>
   </layout>
  </widget>
  <resources/>

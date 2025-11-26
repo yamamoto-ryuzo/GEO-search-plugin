@@ -52,6 +52,18 @@ class ResultDialog(QDialog):
         self.current_table.itemSelectionChanged.connect(lambda: self.selectionChanged.emit())
         self.current_table.itemPressed.connect(lambda item: self.itemPressed.emit(item))
         self.tabWidget.currentChanged.connect(self._on_tab_changed)
+        # display mode: 'table' or 'form'
+        self.display_mode = 'table'
+        try:
+            # connect UI button if present in the .ui
+            self.modeToggleButton.setText(self.tr('Form'))
+            self.modeToggleButton.clicked.connect(self._toggle_display_mode)
+        except Exception:
+            try:
+                # fallback: ensure attribute exists
+                getattr(self, 'modeToggleButton', None)
+            except Exception:
+                pass
 
     def next_page(self):
         value = self.pageBox.value()
@@ -296,6 +308,174 @@ class ResultDialog(QDialog):
         except Exception:
             pass
 
+    def set_form(self, fields, features):
+        """Placeholder API: set results for 'form' display mode (single layer).
+        This stub records provided data and shows the dialog; UI rendering
+        for form mode is implemented later.
+        """
+        # For single-layer form mode, delegate to set_form_by_layer with single entry
+        try:
+            self.set_form_by_layer([(None, fields, features)])
+        except Exception:
+            # fallback minimal behavior
+            try:
+                self._form_tabs = [{"layer": None, "fields": fields, "features": features}]
+                self.setWindowTitle(self.tr("Search Results (Form): {0} items").format(len(features) if features else 0))
+                try:
+                    self.show()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    def set_form_by_layer(self, layers_with_features):
+        """Placeholder API: set results for 'form' display mode with per-layer tabs.
+        Records the provided structures for later rendering.
+        """
+        # Concrete simple implementation: show attributes of the first feature
+        try:
+            self._form_tabs = []
+            total = 0
+            for layer, fields, features in layers_with_features:
+                try:
+                    features = list(features) if features is not None else []
+                except Exception:
+                    features = []
+                total += len(features) if features else 0
+                self._form_tabs.append({"layer": layer, "fields": fields, "features": features})
+
+            # prepare a simple field/value table showing the first feature of the first tab
+            first_tab = self._form_tabs[0] if self._form_tabs else None
+            if not first_tab:
+                self.setWindowTitle(self.tr("Search Results (Form): 0 items"))
+                try:
+                    self.show()
+                except Exception:
+                    pass
+                return
+
+            features = first_tab.get('features') or []
+            fields = first_tab.get('fields') or []
+
+            # if no features, show empty dialog title
+            if not features:
+                self.setWindowTitle(self.tr("Search Results (Form): 0 items"))
+                try:
+                    self.show()
+                except Exception:
+                    pass
+                return
+
+            first_feat = features[0]
+
+            # derive field names if necessary
+            try:
+                if not fields:
+                    try:
+                        derived = list(first_feat.fields())
+                        if derived:
+                            fields = derived
+                    except Exception:
+                        # fallback to attribute keys
+                        try:
+                            fields = []
+                            for k in first_feat.fields():
+                                fields.append(k)
+                        except Exception:
+                            fields = []
+            except Exception:
+                fields = []
+
+            # Build a two-column table in the original tableWidget to display form
+            try:
+                # ensure tableWidget is present
+                tbl = getattr(self, 'tableWidget', None)
+                if tbl is None:
+                    # create a local QTableWidget if missing
+                    from qgis.PyQt.QtWidgets import QTableWidget
+                    tbl = QTableWidget(self)
+            except Exception:
+                from qgis.PyQt.QtWidgets import QTableWidget
+                tbl = QTableWidget(self)
+
+            # Use the existing tabWidget: clear and insert the table as a single tab
+            try:
+                while self.tabWidget.count() > 0:
+                    self.tabWidget.removeTab(0)
+            except Exception:
+                pass
+            try:
+                # prepare table columns: Field / Value
+                tbl.setColumnCount(2)
+                tbl.setHorizontalHeaderLabels([self.tr('Field'), self.tr('Value')])
+                # determine rows from fields
+                names = []
+                for f in fields:
+                    try:
+                        name = f.name() if hasattr(f, 'name') else str(f)
+                    except Exception:
+                        name = str(f)
+                    names.append(name)
+                # if no derived field objects, try to get attribute keys via feature
+                if not names:
+                    try:
+                        names = [str(k) for k in first_feat.keys()]
+                    except Exception:
+                        try:
+                            names = [str(k) for k in first_feat.attributes()]
+                        except Exception:
+                            names = []
+
+                tbl.setRowCount(len(names))
+                from qgis.PyQt.QtWidgets import QTableWidgetItem
+                for i, nm in enumerate(names):
+                    try:
+                        # field name
+                        tbl.setItem(i, 0, QTableWidgetItem(str(nm)))
+                        # value
+                        try:
+                            val = first_feat.attribute(nm)
+                        except Exception:
+                            try:
+                                val = first_feat[nm]
+                            except Exception:
+                                val = ''
+                        tbl.setItem(i, 1, QTableWidgetItem(str(val)))
+                    except Exception:
+                        continue
+
+                try:
+                    self.tabWidget.addTab(tbl, self.tr('Form'))
+                except Exception:
+                    # fallback: replace the original tableWidget
+                    try:
+                        self.tabWidget.insertTab(0, tbl, self.tr('Form'))
+                    except Exception:
+                        pass
+
+                self._tabs = [{"layer": first_tab.get('layer'), "fields": fields, "features": features, "table": tbl}]
+                self.current_table = tbl
+                try:
+                    tbl.resizeColumnsToContents()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"set_form_by_layer: displayed form for first feature with {len(names)} fields", "GEO-search-plugin", 0)
+            except Exception:
+                pass
+
+            self.setWindowTitle(self.tr("Search Results (Form): {0} items").format(total))
+            try:
+                self.show()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def set_feature_items(self, features, table=None, fields=None):
         """Fill provided table with features using provided fields. If not given use current."""
         if table is None:
@@ -505,3 +685,59 @@ class ResultDialog(QDialog):
         self.pageBox.setMaximum(max_page)
         self.pageLabel.setText(f" / {max_page}")
         self.pageBox.setValue(1)
+
+    def _toggle_display_mode(self):
+        """Toggle between table and form display modes.
+        When switching to form mode we call the placeholder `set_form_by_layer`.
+        Switching back restores the table via `set_features_by_layer`.
+        """
+        try:
+            if getattr(self, 'display_mode', 'table') == 'table':
+                # build layer tuples from current tabs
+                layers = []
+                for tab in getattr(self, '_tabs', []) or []:
+                    layers.append((tab.get('layer'), tab.get('fields'), tab.get('features')))
+                # call placeholder form API
+                try:
+                    self.set_form_by_layer(layers)
+                except Exception:
+                    pass
+                self.display_mode = 'form'
+                try:
+                    self.modeToggleButton.setText(self.tr('Table'))
+                except Exception:
+                    try:
+                        self.modeToggleButton.setText('Table')
+                    except Exception:
+                        pass
+            else:
+                # restore table view
+                # prefer using stored _form_tabs if available
+                source = getattr(self, '_form_tabs', None)
+                if source:
+                    layers = []
+                    for t in source:
+                        layers.append((t.get('layer'), t.get('fields'), t.get('features')))
+                    try:
+                        self.set_features_by_layer(layers)
+                    except Exception:
+                        pass
+                else:
+                    # fallback to current _tabs
+                    layers = []
+                    for tab in getattr(self, '_tabs', []) or []:
+                        layers.append((tab.get('layer'), tab.get('fields'), tab.get('features')))
+                    try:
+                        self.set_features_by_layer(layers)
+                    except Exception:
+                        pass
+                self.display_mode = 'table'
+                try:
+                    self.modeToggleButton.setText(self.tr('Form'))
+                except Exception:
+                    try:
+                        self.modeToggleButton.setText('Form')
+                    except Exception:
+                        pass
+        except Exception:
+            pass
