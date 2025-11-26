@@ -64,6 +64,15 @@ class ResultDialog(QDialog):
                 getattr(self, 'modeToggleButton', None)
             except Exception:
                 pass
+        # ensure top-level attribute combo (next to mode button) is hidden initially
+        try:
+            if getattr(self, 'formAttributeCombo', None) is not None:
+                try:
+                    self.formAttributeCombo.setVisible(False)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def next_page(self):
         value = self.pageBox.value()
@@ -797,6 +806,74 @@ class ResultDialog(QDialog):
                         self.modeToggleButton.setText('Table')
                     except Exception:
                         pass
+                # populate and show the top-level attribute combo if present
+                try:
+                    combo = getattr(self, 'formAttributeCombo', None)
+                    if combo is not None:
+                        try:
+                            combo.clear()
+                            names = []
+                            try:
+                                tabs = getattr(self, '_form_tabs', []) or []
+                                if tabs:
+                                    flds = tabs[0].get('fields') or []
+                                    names = [ (f.displayName() if hasattr(f, 'displayName') else (f.name() if hasattr(f, 'name') else str(f))) for f in flds ]
+                                # fallback derive from features
+                                if not names:
+                                    try:
+                                        feats = tabs[0].get('features') or []
+                                        if feats:
+                                            ff = list(feats[0].fields())
+                                            names = [f.name() if hasattr(f, 'name') else str(f) for f in ff]
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                names = []
+                            for n in names:
+                                combo.addItem(str(n))
+                            try:
+                                combo.setVisible(True)
+                            except Exception:
+                                pass
+
+                            # sync selection to the internal formColumnCombo if present
+                            def _on_attr(idx):
+                                try:
+                                    if idx < 0:
+                                        return
+                                    try:
+                                        name = combo.itemText(idx)
+                                    except Exception:
+                                        name = None
+                                    if not name:
+                                        return
+                                    cc = getattr(self, 'formColumnCombo', None)
+                                    if cc is not None:
+                                        try:
+                                            for i in range(cc.count()):
+                                                if cc.itemText(i) == name:
+                                                    cc.setCurrentIndex(i)
+                                                    return
+                                            cc.addItem(name)
+                                            cc.setCurrentIndex(cc.count() - 1)
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+
+                            try:
+                                combo.currentIndexChanged.connect(_on_attr)
+                            except Exception:
+                                pass
+                            try:
+                                if combo.count() > 0:
+                                    combo.setCurrentIndex(0)
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             else:
                 # restore table view
                 # prefer using stored _form_tabs if available
@@ -826,5 +903,14 @@ class ResultDialog(QDialog):
                         self.modeToggleButton.setText('Form')
                     except Exception:
                         pass
+                # hide top-level attribute combo when returning to table view
+                try:
+                    if getattr(self, 'formAttributeCombo', None) is not None:
+                        try:
+                            self.formAttributeCombo.setVisible(False)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
         except Exception:
             pass
