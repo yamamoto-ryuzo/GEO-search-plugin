@@ -157,6 +157,15 @@ class ResultDialog(QDialog):
 
     def set_features_by_layer(self, layers_with_features):
         """Accepts an iterable of (layer, fields, features) and creates a tab per layer."""
+        # if a static formWidget exists in the UI, ensure it's hidden when showing tables
+        try:
+            if getattr(self, 'formWidget', None) is not None:
+                try:
+                    self.formWidget.setVisible(False)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         # clear existing tabs
         self._tabs = []
         # remove all tabs
@@ -286,6 +295,19 @@ class ResultDialog(QDialog):
             QCoreApplication.processEvents()
         except Exception:
             pass
+        # ensure the main tab widget is visible (hide any static form widget)
+        try:
+            if getattr(self, 'formWidget', None) is not None:
+                try:
+                    self.formWidget.setVisible(False)
+                    try:
+                        self.tabWidget.setVisible(True)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
         try:
             from qgis.core import QgsMessageLog
             # dump internal _tabs structure for debugging
@@ -381,21 +403,38 @@ class ResultDialog(QDialog):
             except Exception:
                 first_field_name = None
 
-            # create form container: left list, right text
+            # If the UI provides a `formWidget` with `formFieldList` and `formValueText`, prefer that.
             try:
-                from qgis.PyQt.QtWidgets import QWidget, QHBoxLayout, QListWidget, QTextEdit, QListWidgetItem
-                container = QWidget(self)
-                layout = QHBoxLayout(container)
-                list_widget = QListWidget(container)
-                value_widget = QTextEdit(container)
-                value_widget.setReadOnly(True)
-                layout.addWidget(list_widget)
-                layout.addWidget(value_widget)
+                if getattr(self, 'formWidget', None) is not None and getattr(self, 'formFieldList', None) is not None and getattr(self, 'formValueText', None) is not None:
+                    list_widget = self.formFieldList
+                    value_widget = self.formValueText
+                    # ensure it's visible and hide the tabWidget
+                    try:
+                        self.tabWidget.setVisible(False)
+                    except Exception:
+                        pass
+                    try:
+                        self.formWidget.setVisible(True)
+                    except Exception:
+                        pass
+                else:
+                    from qgis.PyQt.QtWidgets import QWidget, QHBoxLayout, QListWidget, QTextEdit, QListWidgetItem
+                    container = QWidget(self)
+                    layout = QHBoxLayout(container)
+                    list_widget = QListWidget(container)
+                    value_widget = QTextEdit(container)
+                    value_widget.setReadOnly(True)
+                    layout.addWidget(list_widget)
+                    layout.addWidget(value_widget)
             except Exception:
                 return
 
             # populate left list with first-field values (or fid fallback)
             self._form_feature_map = []
+            try:
+                from qgis.PyQt.QtWidgets import QListWidgetItem
+            except Exception:
+                QListWidgetItem = None
             for feat in features:
                 try:
                     if first_field_name:

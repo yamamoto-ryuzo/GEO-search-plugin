@@ -42,6 +42,26 @@
      </attribute>
     </widget>
    </item>
+    <item row="0" column="0" colspan="6">
+     <widget class="QSplitter" name="formWidget">
+      <property name="visible">
+      <bool>false</bool>
+      </property>
+      <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+      </property>
+      <widget class="QListWidget" name="formFieldList">
+      <property name="minimumWidth">
+       <number>200</number>
+      </property>
+      </widget>
+      <widget class="QTextEdit" name="formValueText">
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+      </widget>
+     </widget>
+    </item>
    <item row="2" column="0">
     <widget class="QPushButton" name="prevButton">
      <property name="text">
