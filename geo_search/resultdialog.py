@@ -332,7 +332,8 @@ class ResultDialog(QDialog):
         """Placeholder API: set results for 'form' display mode with per-layer tabs.
         Records the provided structures for later rendering.
         """
-        # Concrete simple implementation: show attributes of the first feature
+        # Concrete implementation: left = list of first-field values across features,
+        # right = attribute display for selected feature.
         try:
             self._form_tabs = []
             total = 0
@@ -344,7 +345,6 @@ class ResultDialog(QDialog):
                 total += len(features) if features else 0
                 self._form_tabs.append({"layer": layer, "fields": fields, "features": features})
 
-            # prepare a simple field/value table showing the first feature of the first tab
             first_tab = self._form_tabs[0] if self._form_tabs else None
             if not first_tab:
                 self.setWindowTitle(self.tr("Search Results (Form): 0 items"))
@@ -356,8 +356,6 @@ class ResultDialog(QDialog):
 
             features = first_tab.get('features') or []
             fields = first_tab.get('fields') or []
-
-            # if no features, show empty dialog title
             if not features:
                 self.setWindowTitle(self.tr("Search Results (Form): 0 items"))
                 try:
@@ -366,105 +364,155 @@ class ResultDialog(QDialog):
                     pass
                 return
 
-            first_feat = features[0]
-
-            # derive field names if necessary
+            # determine first field name
+            first_field_name = None
             try:
-                if not fields:
+                if fields:
+                    f0 = fields[0]
+                    first_field_name = f0.name() if hasattr(f0, 'name') else str(f0)
+                else:
+                    # try derive from feature.fields()
                     try:
-                        derived = list(first_feat.fields())
-                        if derived:
-                            fields = derived
+                        ff = list(features[0].fields())
+                        if ff:
+                            first_field_name = ff[0].name() if hasattr(ff[0], 'name') else str(ff[0])
                     except Exception:
-                        # fallback to attribute keys
-                        try:
-                            fields = []
-                            for k in first_feat.fields():
-                                fields.append(k)
-                        except Exception:
-                            fields = []
+                        first_field_name = None
             except Exception:
-                fields = []
+                first_field_name = None
 
-            # Build a two-column table in the original tableWidget to display form
+            # create form container: left list, right text
             try:
-                # ensure tableWidget is present
-                tbl = getattr(self, 'tableWidget', None)
-                if tbl is None:
-                    # create a local QTableWidget if missing
-                    from qgis.PyQt.QtWidgets import QTableWidget
-                    tbl = QTableWidget(self)
+                from qgis.PyQt.QtWidgets import QWidget, QHBoxLayout, QListWidget, QTextEdit, QListWidgetItem
+                container = QWidget(self)
+                layout = QHBoxLayout(container)
+                list_widget = QListWidget(container)
+                value_widget = QTextEdit(container)
+                value_widget.setReadOnly(True)
+                layout.addWidget(list_widget)
+                layout.addWidget(value_widget)
             except Exception:
-                from qgis.PyQt.QtWidgets import QTableWidget
-                tbl = QTableWidget(self)
+                return
 
-            # Use the existing tabWidget: clear and insert the table as a single tab
+            # populate left list with first-field values (or fid fallback)
+            self._form_feature_map = []
+            for feat in features:
+                try:
+                    if first_field_name:
+                        try:
+                            v = feat.attribute(first_field_name)
+                        except Exception:
+                            try:
+                                v = feat[first_field_name]
+                            except Exception:
+                                v = ''
+                    else:
+                        # fallback: use feature id
+                        try:
+                            v = feat.id()
+                        except Exception:
+                            v = ''
+                    item = QListWidgetItem(str(v))
+                    # store feature id for potential use
+                    try:
+                        item.setData(self.data_role, feat.id())
+                    except Exception:
+                        pass
+                    list_widget.addItem(item)
+                    self._form_feature_map.append(feat)
+                except Exception:
+                    continue
+
+            # connect selection -> show attributes of selected feature
+            def _on_select():
+                try:
+                    row = list_widget.currentRow()
+                    if row < 0 or row >= len(self._form_feature_map):
+                        value_widget.setPlainText('')
+                        return
+                    f = self._form_feature_map[row]
+                    # build attribute text
+                    lines = []
+                    # prefer fields order if available
+                    try:
+                        fld_objs = fields if fields else list(f.fields())
+                    except Exception:
+                        fld_objs = []
+                    if fld_objs:
+                        for fo in fld_objs:
+                            try:
+                                fname = fo.name() if hasattr(fo, 'name') else str(fo)
+                                try:
+                                    val = f.attribute(fname)
+                                except Exception:
+                                    try:
+                                        val = f[fname]
+                                    except Exception:
+                                        val = ''
+                                lines.append(f"{fname}: {val}")
+                            except Exception:
+                                continue
+                    else:
+                        # fallback: use attribute names from feature
+                        try:
+                            for k in f.fields():
+                                try:
+                                    kn = k.name() if hasattr(k, 'name') else str(k)
+                                    try:
+                                        val = f.attribute(kn)
+                                    except Exception:
+                                        val = ''
+                                    lines.append(f"{kn}: {val}")
+                                except Exception:
+                                    continue
+                        except Exception:
+                            # final fallback: attributes() list
+                            try:
+                                attrs = f.attributes()
+                                for i, v in enumerate(attrs):
+                                    lines.append(f"{i}: {v}")
+                            except Exception:
+                                lines = [str(f)]
+                    value_widget.setPlainText('\n'.join(lines))
+                except Exception:
+                    try:
+                        value_widget.setPlainText('')
+                    except Exception:
+                        pass
+
+            list_widget.currentRowChanged.connect(lambda _: _on_select())
+
+            # clear existing tabs and insert the container as a single tab
             try:
                 while self.tabWidget.count() > 0:
                     self.tabWidget.removeTab(0)
             except Exception:
                 pass
             try:
-                # prepare table columns: Field / Value
-                tbl.setColumnCount(2)
-                tbl.setHorizontalHeaderLabels([self.tr('Field'), self.tr('Value')])
-                # determine rows from fields
-                names = []
-                for f in fields:
-                    try:
-                        name = f.name() if hasattr(f, 'name') else str(f)
-                    except Exception:
-                        name = str(f)
-                    names.append(name)
-                # if no derived field objects, try to get attribute keys via feature
-                if not names:
-                    try:
-                        names = [str(k) for k in first_feat.keys()]
-                    except Exception:
-                        try:
-                            names = [str(k) for k in first_feat.attributes()]
-                        except Exception:
-                            names = []
-
-                tbl.setRowCount(len(names))
-                from qgis.PyQt.QtWidgets import QTableWidgetItem
-                for i, nm in enumerate(names):
-                    try:
-                        # field name
-                        tbl.setItem(i, 0, QTableWidgetItem(str(nm)))
-                        # value
-                        try:
-                            val = first_feat.attribute(nm)
-                        except Exception:
-                            try:
-                                val = first_feat[nm]
-                            except Exception:
-                                val = ''
-                        tbl.setItem(i, 1, QTableWidgetItem(str(val)))
-                    except Exception:
-                        continue
-
+                self.tabWidget.addTab(container, self.tr('Form'))
+            except Exception:
                 try:
-                    self.tabWidget.addTab(tbl, self.tr('Form'))
-                except Exception:
-                    # fallback: replace the original tableWidget
-                    try:
-                        self.tabWidget.insertTab(0, tbl, self.tr('Form'))
-                    except Exception:
-                        pass
-
-                self._tabs = [{"layer": first_tab.get('layer'), "fields": fields, "features": features, "table": tbl}]
-                self.current_table = tbl
-                try:
-                    tbl.resizeColumnsToContents()
+                    self.tabWidget.insertTab(0, container, self.tr('Form'))
                 except Exception:
                     pass
+
+            # update internal tab mapping to point to our list widget as table for selection handlers
+            try:
+                self._tabs = [{"layer": first_tab.get('layer'), "fields": fields, "features": features, "table": list_widget}]
+                self.current_table = list_widget
+            except Exception:
+                pass
+
+            # auto-select first item to show its attributes
+            try:
+                if list_widget.count() > 0:
+                    list_widget.setCurrentRow(0)
             except Exception:
                 pass
 
             try:
                 from qgis.core import QgsMessageLog
-                QgsMessageLog.logMessage(f"set_form_by_layer: displayed form for first feature with {len(names)} fields", "GEO-search-plugin", 0)
+                QgsMessageLog.logMessage(f"set_form_by_layer: built form list with {len(self._form_feature_map)} items (first_field={first_field_name})", "GEO-search-plugin", 0)
             except Exception:
                 pass
 
