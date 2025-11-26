@@ -426,6 +426,30 @@ class ResultDialog(QDialog):
                         self.formWidget.setVisible(True)
                     except Exception:
                         pass
+                    try:
+                        splitter = getattr(self, 'formWidget', None)
+                        if splitter is not None:
+                            try:
+                                # prefer stretch factors
+                                splitter.setStretchFactor(0, 2)
+                                splitter.setStretchFactor(1, 8)
+                            except Exception:
+                                pass
+                            try:
+                                # ensure sizes respect the current widget width by using proportions
+                                from qgis.PyQt.QtCore import QCoreApplication
+                                QCoreApplication.processEvents()
+                                total = splitter.width() or self.width() or 1000
+                                left = int(total * 0.2)
+                                right = max(1, total - left)
+                                splitter.setSizes([left, right])
+                            except Exception:
+                                try:
+                                    splitter.setSizes([200, 800])
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
                 else:
                     from qgis.PyQt.QtWidgets import QWidget, QHBoxLayout, QListWidget, QTextEdit, QListWidgetItem
                     container = QWidget(self)
