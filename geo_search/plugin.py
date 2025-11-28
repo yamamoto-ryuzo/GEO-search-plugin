@@ -1089,7 +1089,7 @@ class plugin(object):
             pass
 
         # Ensure project variable 'geo_search_json' exists.
-        # Use legacy `writeEntry` only (per request).
+        # Set to a sensible default: <project_name>_search.json in project folder
         try:
             from qgis.core import QgsExpressionContextUtils, QgsMessageLog
             try:
@@ -1103,10 +1103,22 @@ class plugin(object):
             except Exception:
                 has_var = False
 
+            # derive default project search file path: "<project_name>_search.json" in project dir
+            try:
+                proj_file = ProjectInstance.fileName()
+                if proj_file:
+                    proj_dir = os.path.dirname(proj_file)
+                    proj_name = os.path.splitext(os.path.basename(proj_file))[0]
+                    default_search_path = os.path.join(proj_dir, f"{proj_name}_search.json")
+                else:
+                    default_search_path = ''
+            except Exception:
+                default_search_path = ''
+
             if not has_var:
                 try:
-                    QgsExpressionContextUtils.setProjectVariable(ProjectInstance, 'geo_search_json', '')
-                    QgsMessageLog.logMessage("Created project variable 'geo_search_json' via QgsExpressionContextUtils.setProjectVariable", "GEO-search-plugin", 0)
+                    QgsExpressionContextUtils.setProjectVariable(ProjectInstance, 'geo_search_json', default_search_path)
+                    QgsMessageLog.logMessage(f"Created project variable 'geo_search_json' via QgsExpressionContextUtils.setProjectVariable: {default_search_path}", "GEO-search-plugin", 0)
                 except Exception as e:
                     try:
                         QgsMessageLog.logMessage(f"Failed to create project variable 'geo_search_json' via setProjectVariable: {e}", "GEO-search-plugin", 2)
@@ -1117,8 +1129,8 @@ class plugin(object):
             try:
                 if proj_scope is not None and hasattr(proj_scope, 'setVariable'):
                     try:
-                        proj_scope.setVariable('geo_search_json', '')
-                        QgsMessageLog.logMessage("Set projectScope variable 'geo_search_json' to empty string", "GEO-search-plugin", 0)
+                        proj_scope.setVariable('geo_search_json', default_search_path)
+                        QgsMessageLog.logMessage(f"Set projectScope variable 'geo_search_json' to: {default_search_path}", "GEO-search-plugin", 0)
                     except Exception:
                         pass
             except Exception:
@@ -1134,16 +1146,52 @@ class plugin(object):
             ctx_var = None
 
         if ctx_var is not None and ctx_var != "":
-            input_json_variable = ctx_var
-            # 設定読み込みの診断ログ (QGIS メッセージログに出力)
+            # If project variable points to a file path, read the file contents
+            input_json_variable = ""
             try:
-                from qgis.core import QgsMessageLog
-                QgsMessageLog.logMessage(f"Found variable from projectScope: {ctx_var}", "GEO-search-plugin", 0)
+                # If the variable looks like JSON text, use it directly.
+                ctx_text = str(ctx_var).strip()
+                if ctx_text.startswith('{') or ctx_text.startswith('['):
+                    input_json_variable = ctx_var
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Found variable from projectScope (inline JSON): {ctx_text[:80]}", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+                else:
+                    candidate = None
+                    if isinstance(ctx_var, str) and os.path.isabs(ctx_var):
+                        candidate = ctx_var
+                    else:
+                        # try project folder first, then plugin folder
+                        try:
+                            proj_file = ProjectInstance.fileName()
+                            proj_dir = os.path.dirname(proj_file) if proj_file else None
+                        except Exception:
+                            proj_dir = None
+                        if proj_dir:
+                            candidate = os.path.join(proj_dir, ctx_var)
+                        else:
+                            candidate = os.path.join(os.path.dirname(__file__), ctx_var)
+
+                    if candidate and os.path.exists(candidate):
+                        try:
+                            with open(candidate, 'r', encoding='utf-8') as f:
+                                input_json_variable = f.read()
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Loaded settings file from project variable geo_search_json: {candidate}", "GEO-search-plugin", 0)
+                        except Exception:
+                            input_json_variable = ''
+                    else:
+                        # don't append raw path strings into JSON; ignore if file missing
+                        input_json_variable = ''
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"geo_search_json project variable points to missing file: {candidate}", "GEO-search-plugin", 1)
+                        except Exception:
+                            pass
             except Exception:
-                try:
-                    print(f"Found variable from projectScope: {ctx_var}")
-                except Exception:
-                    pass
+                input_json_variable = ctx_var
 
         # ファイルと変数を結合
         if input_json_file != "":
