@@ -1103,6 +1103,15 @@ class plugin(object):
             except Exception:
                 has_var = False
 
+            # read existing project variable value (if any) to detect empty string
+            try:
+                try:
+                    existing_val = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('geo_search_json')
+                except Exception:
+                    existing_val = None
+            except Exception:
+                existing_val = None
+
             # derive default project search file path: "<project_name>_search.json" in project dir
             try:
                 proj_file = ProjectInstance.fileName()
@@ -1115,13 +1124,19 @@ class plugin(object):
             except Exception:
                 default_search_path = ''
 
-            if not has_var:
+            # If variable missing or present but empty, initialize it to default_search_path
+            try:
+                need_set = (not has_var) or (existing_val is None) or (isinstance(existing_val, str) and existing_val == "")
+            except Exception:
+                need_set = (not has_var)
+
+            if need_set:
                 try:
                     QgsExpressionContextUtils.setProjectVariable(ProjectInstance, 'geo_search_json', default_search_path)
-                    QgsMessageLog.logMessage(f"Created project variable 'geo_search_json' via QgsExpressionContextUtils.setProjectVariable: {default_search_path}", "GEO-search-plugin", 0)
+                    QgsMessageLog.logMessage(f"Created/initialized project variable 'geo_search_json' via QgsExpressionContextUtils.setProjectVariable: {default_search_path}", "GEO-search-plugin", 0)
                 except Exception as e:
                     try:
-                        QgsMessageLog.logMessage(f"Failed to create project variable 'geo_search_json' via setProjectVariable: {e}", "GEO-search-plugin", 2)
+                        QgsMessageLog.logMessage(f"Failed to create/initialize project variable 'geo_search_json' via setProjectVariable: {e}", "GEO-search-plugin", 2)
                     except Exception:
                         pass
 
@@ -1129,8 +1144,14 @@ class plugin(object):
             try:
                 if proj_scope is not None and hasattr(proj_scope, 'setVariable'):
                     try:
-                        proj_scope.setVariable('geo_search_json', default_search_path)
-                        QgsMessageLog.logMessage(f"Set projectScope variable 'geo_search_json' to: {default_search_path}", "GEO-search-plugin", 0)
+                        # Only set runtime variable if missing or empty to avoid overwriting user value
+                        try:
+                            scope_val = proj_scope.variable('geo_search_json')
+                        except Exception:
+                            scope_val = None
+                        if scope_val is None or (isinstance(scope_val, str) and scope_val == ""):
+                            proj_scope.setVariable('geo_search_json', default_search_path)
+                            QgsMessageLog.logMessage(f"Set projectScope variable 'geo_search_json' to: {default_search_path}", "GEO-search-plugin", 0)
                     except Exception:
                         pass
             except Exception:
