@@ -360,9 +360,32 @@ class SettingsDialog(QDialog):
             from qgis.core import QgsProject, QgsExpressionContextUtils, QgsMessageLog
             proj = QgsProject.instance()
             try:
-                QgsExpressionContextUtils.setProjectVariable(proj, 'geo_search_json', path)
+                # プロジェクトが保存されている場合はプロジェクトディレクトリ基準の相対パスに変換して保存する
                 try:
-                    QgsMessageLog.logMessage(f"Set project variable 'geo_search_json' to: {path}", 'GEO-search-plugin', 0)
+                    proj_file = proj.fileName() or ""
+                    proj_dir = os.path.dirname(proj_file) if proj_file else ""
+                except Exception:
+                    proj_dir = ""
+
+                save_val = path
+                try:
+                    if proj_dir:
+                        abs_path = os.path.abspath(path)
+                        abs_proj = os.path.abspath(proj_dir)
+                        try:
+                            # path がプロジェクトディレクトリ以下にある場合は相対パスで保存
+                            if os.path.commonpath([abs_proj, abs_path]) == abs_proj:
+                                rel = os.path.relpath(abs_path, abs_proj)
+                                save_val = rel
+                        except Exception:
+                            # commonpath may raise on different drives on Windows; fall back to absolute
+                            save_val = path
+                except Exception:
+                    save_val = path
+
+                QgsExpressionContextUtils.setProjectVariable(proj, 'geo_search_json', save_val)
+                try:
+                    QgsMessageLog.logMessage(f"Set project variable 'geo_search_json' to: {save_val}", 'GEO-search-plugin', 0)
                 except Exception:
                     pass
             except Exception as e:
