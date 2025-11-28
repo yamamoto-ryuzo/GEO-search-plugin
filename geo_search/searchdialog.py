@@ -1602,7 +1602,20 @@ class SearchDialog(QDialog):
             if os.path.exists(path):
                 try:
                     with open(path, 'r', encoding='utf-8') as fh:
-                        data = json.load(fh)
+                        text = fh.read()
+                    try:
+                        # try strict JSON first
+                        data = json.loads(text)
+                    except Exception:
+                        # fallback: some legacy setting.json files contain
+                        # multiple top-level objects without an enclosing array.
+                        # Try to wrap in [] and parse as array of objects so
+                        # we can preserve and append to them instead of
+                        # overwriting the file.
+                        try:
+                            data = json.loads(f'[{text}]')
+                        except Exception:
+                            data = None
                 except Exception:
                     data = None
 
