@@ -3,7 +3,7 @@
 Simple settings dialog for GEO-search-plugin.
 日本語コメント: 設定ダイアログの実装ファイル。必要な設定ウィジェットをここに追加してください。
 """
-from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPushButton
+from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QLineEdit
 from qgis.PyQt.QtWidgets import QInputDialog, QMessageBox, QComboBox, QFileDialog
 import os
 import re
@@ -29,6 +29,41 @@ class SettingsDialog(QDialog):
         info = QLabel(self.tr("Settings dialog: add options here."), self)
         layout.addWidget(info)
 
+        # geo_search_json ファイル指定用コントロール
+        geo_ctrl = QHBoxLayout()
+        geo_label = QLabel(self.tr("Settings file (geo_search_json):"), self)
+        self.geo_line = QLineEdit(self)
+        # 現在値を取得して表示（環境変数優先）
+        try:
+            import os
+            from qgis.core import QgsProject, QgsExpressionContextUtils
+            env_val = os.environ.get('geo_search_json')
+        except Exception:
+            env_val = None
+        try:
+            if env_val:
+                self.geo_line.setText(str(env_val))
+            else:
+                try:
+                    proj = QgsProject.instance()
+                    try:
+                        pv = QgsExpressionContextUtils.projectScope(proj).variable('geo_search_json')
+                    except Exception:
+                        pv = None
+                    if pv:
+                        self.geo_line.setText(str(pv))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        browse_geo_btn = QPushButton(self.tr("Browse..."), self)
+        apply_geo_btn = QPushButton(self.tr("Apply"), self)
+        geo_ctrl.addWidget(geo_label)
+        geo_ctrl.addWidget(self.geo_line)
+        geo_ctrl.addWidget(browse_geo_btn)
+        geo_ctrl.addWidget(apply_geo_btn)
+        layout.addLayout(geo_ctrl)
+
         # テーマ操作用コントロール（ユーザーテーマの保存 / 読込）
         theme_ctrl = QHBoxLayout()
         save_user_btn = QPushButton(self.tr("Save User Theme..."), self)
@@ -41,6 +76,15 @@ class SettingsDialog(QDialog):
         # export/import buttons removed per request
         save_user_btn.clicked.connect(self.save_user_theme_dialog)
         load_user_btn.clicked.connect(self.load_user_theme_dialog)
+        # geo_search_json 用のハンドラ
+        try:
+            browse_geo_btn.clicked.connect(self._browse_geo_search_json)
+        except Exception:
+            pass
+        try:
+            apply_geo_btn.clicked.connect(self._apply_geo_search_json)
+        except Exception:
+            pass
 
         # 下部に OK / Cancel を右寄せで配置
         btn_layout = QHBoxLayout()
@@ -285,6 +329,57 @@ class SettingsDialog(QDialog):
             QMessageBox.information(self, self.tr("Load User Theme"), self.tr("Applied theme to %n layers", None, len(applied)))
         except Exception as e:
             QMessageBox.warning(self, self.tr("Load User Theme"), str(e))
+
+
+    def _browse_geo_search_json(self):
+        """ファイル選択ダイアログで geo_search_json のファイルを選択する。"""
+        try:
+            start_dir = os.path.dirname(__file__)
+        except Exception:
+            start_dir = ""
+        try:
+            path, _ = QFileDialog.getOpenFileName(self, self.tr("Select settings file"), start_dir, "JSON files (*.json);;All files (*)")
+        except Exception:
+            path = None
+        if path:
+            try:
+                self.geo_line.setText(path)
+            except Exception:
+                pass
+
+    def _apply_geo_search_json(self):
+        """選択されたパスをプロジェクト変数 `geo_search_json` として保存し、ランタイム環境変数にも設定する。"""
+        try:
+            path = str(self.geo_line.text()).strip()
+        except Exception:
+            path = ""
+        if not path:
+            QMessageBox.warning(self, self.tr("geo_search_json"), self.tr("No file selected."))
+            return
+        try:
+            from qgis.core import QgsProject, QgsExpressionContextUtils, QgsMessageLog
+            proj = QgsProject.instance()
+            try:
+                QgsExpressionContextUtils.setProjectVariable(proj, 'geo_search_json', path)
+                try:
+                    QgsMessageLog.logMessage(f"Set project variable 'geo_search_json' to: {path}", 'GEO-search-plugin', 0)
+                except Exception:
+                    pass
+            except Exception as e:
+                try:
+                    QgsMessageLog.logMessage(f"Failed to set project variable 'geo_search_json': {e}", 'GEO-search-plugin', 2)
+                except Exception:
+                    pass
+        except Exception:
+            # qgis.core が使えない環境でもランタイム環境変数は設定する
+            pass
+        # ランタイム環境変数としても設定（永続化はしない）
+        try:
+            import os
+            os.environ['geo_search_json'] = path
+        except Exception:
+            pass
+        QMessageBox.information(self, self.tr("geo_search_json"), self.tr("Saved geo_search_json to project variables (and runtime env)."))
 
     def import_themes_from_dir(self, theme_dir: str):
         """ディレクトリ内の .xml ファイルを読み込んでプロジェクトのテーマコレクションへ追加する。追加したテーマ名のリストを返す"""
