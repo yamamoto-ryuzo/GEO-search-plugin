@@ -317,6 +317,34 @@ class ResultDialog(QDialog):
                     pass
         except Exception:
             pass
+        # Ensure internal mode state matches the UI: when results are set via
+        # `set_features_by_layer` we are showing tables (not form). Keep the
+        # display_mode flag and mode toggle button synchronized so that
+        # subsequent toggles behave predictably (avoid mismatch when a new
+        # search replaces form UI with tables).
+        try:
+            self.display_mode = 'table'
+        except Exception:
+            pass
+        try:
+            if getattr(self, 'modeToggleButton', None) is not None:
+                try:
+                    self.modeToggleButton.setText(self.tr('Form'))
+                except Exception:
+                    try:
+                        self.modeToggleButton.setText('Form')
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        try:
+            if getattr(self, 'formAttributeCombo', None) is not None:
+                try:
+                    self.formAttributeCombo.setVisible(False)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         try:
             from qgis.core import QgsMessageLog
             # dump internal _tabs structure for debugging
@@ -575,6 +603,24 @@ class ResultDialog(QDialog):
                         pass
 
             list_widget.currentRowChanged.connect(lambda _: _on_select())
+
+            # Forward QListWidget selection/click signals to dialog-level signals
+            # so external callers (e.g., SearchFeature.zoom_items) receive the
+            # same events as when using table widgets and can perform pan/zoom.
+            try:
+                list_widget.currentRowChanged.connect(lambda _: self.selectionChanged.emit())
+            except Exception:
+                pass
+            try:
+                # emit itemPressed when an item is pressed/clicked
+                list_widget.itemPressed.connect(lambda it: self.itemPressed.emit(it))
+            except Exception:
+                pass
+            try:
+                # also forward itemClicked for mouse click compatibility
+                list_widget.itemClicked.connect(lambda it: self.itemPressed.emit(it))
+            except Exception:
+                pass
 
             # wire column_combo to update left list when available
             try:
