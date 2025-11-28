@@ -3,7 +3,7 @@
 name=geo_search
 qgisMinimumVersion=3.00
 qgisMaximumVersion=3.99
-version=3.2.16
+version=3.2.26
 author=yamamotoryuzo
 email=ryu@yamakun.net
 tracker=https://github.com/yamamoto-ryuzo/GEO-search-plugin

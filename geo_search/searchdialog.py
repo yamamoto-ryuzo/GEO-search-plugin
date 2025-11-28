@@ -142,8 +142,38 @@ class SearchDialog(QDialog):
         return SearchTextWidget(setting)
 
     def create_tab_groups(self, search_tabs):
+        # Normalize input: accept dict, list of dicts, or nested lists produced
+        # by different sources (plugin setting.json, project var, env file).
+        try:
+            if search_tabs is None:
+                return OrderedDict()
+            if isinstance(search_tabs, dict):
+                search_tabs = [search_tabs]
+            normalized = []
+            for st in search_tabs:
+                if isinstance(st, list):
+                    for s in st:
+                        if isinstance(s, dict):
+                            normalized.append(s)
+                elif isinstance(st, dict):
+                    normalized.append(st)
+                else:
+                    # skip unknown entries
+                    continue
+            search_tabs = normalized
+        except Exception:
+            search_tabs = []
+
         tab_groups = OrderedDict()
         for search_tab in search_tabs:
+            # ensure each entry is a dict
+            if not isinstance(search_tab, dict):
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Skipping invalid tab entry (not dict): {repr(search_tab)}", "GEO-search-plugin", 1)
+                except Exception:
+                    print(f"Skipping invalid tab entry (not dict): {repr(search_tab)}")
+                continue
             group_name = search_tab.get("group", OTHER_GROUP_NAME)
             if group_name not in tab_groups:
                 group_widget = QTabWidget()
@@ -327,7 +357,104 @@ class SearchDialog(QDialog):
             try:
                 save_target = self.choose_save_target_dialog()
             except Exception:
-                save_target = 'project'
+                # If dialog fails unexpectedly, do not assume project - abort
+                save_target = None
+
+            # If user cancelled selection (None), gather diagnostic information
+            # to help determine why the save did not proceed, then log and
+            # present the details to the user. Do NOT retry automatically.
+            if save_target is None:
+                diag = []
+                diag.append("save_target: None (user cancelled or dialog failed)")
+
+                # Environment variable check
+                try:
+                    env_val = os.environ.get('geo_search_json')
+                    diag.append(f"env geo_search_json={env_val}")
+                except Exception as e:
+                    diag.append(f"env geo_search_json: error: {e}")
+
+                # Project variable check
+                try:
+                    from qgis.core import QgsProject, QgsExpressionContextUtils
+                    proj = QgsProject.instance()
+                    pv = QgsExpressionContextUtils.projectScope(proj).variable('geo_search_json')
+                    proj_file = proj.fileName() or ''
+                    diag.append(f"project.geo_search_json={pv}")
+                    diag.append(f"project.filename={proj_file}")
+                except Exception as e:
+                    diag.append(f"project geo_search_json check error: {e}")
+
+                # plugin setting.json check
+                try:
+                    plugin_dir = os.path.dirname(__file__)
+                    setting_path = os.path.join(plugin_dir, 'setting.json')
+                    exists = os.path.exists(setting_path)
+                    try:
+                        writable = os.access(setting_path, os.W_OK) if exists else os.access(plugin_dir, os.W_OK)
+                    except Exception:
+                        writable = False
+                    diag.append(f"plugin setting.json path={setting_path} exists={exists} writable={writable}")
+                except Exception as e:
+                    diag.append(f"plugin setting.json check error: {e}")
+
+                # Active layer / layer info
+                try:
+                    layer_info = "<no iface available>"
+                    iface = getattr(self, 'iface', None)
+                    if iface is None and hasattr(self.parent(), 'iface'):
+                        iface = getattr(self.parent(), 'iface')
+                    if iface is not None:
+                        layer = iface.activeLayer()
+                        if layer is None:
+                            layer_info = "activeLayer: None"
+                        else:
+                            try:
+                                layer_name = layer.name() if hasattr(layer, 'name') else str(layer)
+                                fields_count = len(list(layer.fields())) if hasattr(layer, 'fields') else 'unknown'
+                                layer_info = f"activeLayer.name={layer_name} fields={fields_count}"
+                            except Exception as e:
+                                layer_info = f"activeLayer introspect error: {e}"
+                    diag.append(layer_info)
+                except Exception as e:
+                    diag.append(f"active layer check error: {e}")
+
+                # Log diagnostics
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("Add current layer aborted; diagnostics:\n" + "\n".join(diag), "GEO-search-plugin", 1)
+                except Exception:
+                    print("Add current layer aborted; diagnostics:")
+                    for d in diag:
+                        print(d)
+
+                # Show dialog with summary and detailed text for troubleshooting
+                try:
+                    msg = QMessageBox(self)
+                    msg.setIcon(QMessageBox.Warning)
+                    msg.setWindowTitle(self.tr("Add current layer aborted"))
+                    msg.setText(self.tr("The save operation was cancelled. Diagnostic information has been logged."))
+                    # setDetailedText is available on QMessageBox to show long diagnostics
+                    try:
+                        msg.setDetailedText("\n".join(diag))
+                    except Exception:
+                        # Fallback: append diagnostics to text if detailed not available
+                        msg.setText(msg.text() + "\n\n" + "\n".join(diag))
+                    try:
+                        msg.exec_()
+                    except Exception:
+                        try:
+                            msg.exec()
+                        except Exception:
+                            pass
+                except Exception:
+                    # As a last resort, show a simple information box
+                    try:
+                        QMessageBox.information(self, self.tr("Cancelled"), self.tr("Add current layer aborted. See log for details."))
+                    except Exception:
+                        pass
+
+                return
 
             # read existing variable (used when saving to project variable)
             proj_scope = QgsExpressionContextUtils.projectScope(project)
@@ -1378,9 +1505,9 @@ class SearchDialog(QDialog):
         try:
             from qgis.PyQt.QtWidgets import QInputDialog
             items = [
+                "geo_search_json (project-specified file)",
                 "Project variable (GEO-search-plugin)",
                 "Plugin setting.json",
-                "geo_search_json (project-specified file)"
             ]
             # default to project, but if geo_search_json is configured, prefer that
             default_index = 0
@@ -1399,21 +1526,72 @@ class SearchDialog(QDialog):
                 default_index = 0
 
             try:
-                ok, item = QInputDialog.getItem(self, self.tr("Choose save target"), self.tr("Select where to save new setting:"), items, default_index, False)
+                raw = QInputDialog.getItem(self, self.tr("Choose save target"), self.tr("Select where to save new setting:"), items, default_index, False)
             except Exception:
-                item = items[0]
-                ok = True
+                raw = None
+
+            # Normalize returned value from QInputDialog.getItem across PyQt versions
+            item = None
+            ok = False
+            try:
+                if raw is None:
+                    item = None
+                    ok = False
+                elif isinstance(raw, tuple) and len(raw) == 2:
+                    a, b = raw
+                    # Common cases: (item, ok) or (ok, item)
+                    if isinstance(a, bool) and not isinstance(b, bool):
+                        ok, item = a, b
+                    elif isinstance(b, bool) and not isinstance(a, bool):
+                        item, ok = a, b
+                    else:
+                        # Heuristic: check which element matches items
+                        if isinstance(a, str) and a in items:
+                            item, ok = a, b
+                        elif isinstance(b, str) and b in items:
+                            item, ok = b, a
+                        else:
+                            # Fallback: assume (item, ok)
+                            item, ok = a, b
+                else:
+                    # Some bindings may return a single value or other form
+                    if isinstance(raw, str) and raw in items:
+                        item = raw
+                        ok = True
+                    else:
+                        # Unknown format
+                        item = None
+                        ok = False
+            except Exception:
+                item = None
+                ok = False
+
+            # Log raw and normalized result to help debug selection issues
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"choose_save_target_dialog raw_return={repr(raw)} normalized=(item={repr(item)}, ok={ok})", "GEO-search-plugin", 0)
+            except Exception:
+                try:
+                    print(f"choose_save_target_dialog raw_return={repr(raw)} normalized=(item={repr(item)}, ok={ok})")
+                except Exception:
+                    pass
+
+            # If user cancelled or no selection, return None so caller can decide
             if not ok or not item:
-                return 'project'
+                return None
+
+            # Map selected item to internal code
             if item == items[0]:
-                return 'project'
-            if item == items[1]:
-                return 'setting_json'
-            if item == items[2]:
                 return 'geo_search_json'
-            return 'project'
+            if item == items[1]:
+                return 'project'
+            if item == items[2]:
+                return 'setting_json'
+            return None
         except Exception:
-            return 'project'
+            # On unexpected error showing the dialog, do not silently fallback;
+            # return None so callers must handle the absence of a selection.
+            return None
 
     def _write_to_setting_json(self, new_item_or_list):
         """Write new_item_or_list into plugin's `setting.json` (append into SearchTabs if present)."""
@@ -2072,10 +2250,25 @@ class SearchDialog(QDialog):
             try:
                 save_target = self.choose_save_target_dialog()
             except Exception:
-                save_target = 'project'
+                # dialog failed to open; treat as no selection
+                save_target = None
 
             try:
-                if save_target == 'project' or save_target is None:
+                # If user cancelled/no selection, abort save and keep edit dialog open
+                if save_target is None:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage("No save target selected; aborting update_config_and_save", "GEO-search-plugin", 0)
+                    except Exception:
+                        print("No save target selected; aborting update_config_and_save")
+                    # Inform the user
+                    try:
+                        QMessageBox.information(dialog, self.tr("Save cancelled"), self.tr("No save target selected. The configuration was not saved."))
+                    except Exception:
+                        pass
+                    return
+
+                if save_target == 'project':
                     # Method 1: setProjectVariable
                     try:
                         QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)

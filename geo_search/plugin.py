@@ -1051,9 +1051,15 @@ class plugin(object):
                     pv = None
                 if pv:
                     pv_text = str(pv).strip()
-                    # ignore inline JSON (starting with { or [)
-                    if pv_text and not (pv_text.startswith('{') or pv_text.startswith('[')):
-                        # resolve relative to project dir first
+                    # If the project variable contains inline JSON (starts with { or [), use it directly.
+                    if pv_text and (pv_text.startswith('{') or pv_text.startswith('[')):
+                        try:
+                            input_json_proj = pv_text
+                            QgsMessageLog.logMessage(f"Loaded project variable GEO-search-plugin from inline JSON (project scope).", "GEO-search-plugin", 0)
+                        except Exception:
+                            input_json_proj = ''
+                    else:
+                        # treat project variable as path to a JSON file
                         try:
                             proj_file = ProjectInstance.fileName()
                             proj_dir = os.path.dirname(proj_file) if proj_file else None
@@ -1112,32 +1118,59 @@ class plugin(object):
             except Exception:
                 pass
 
-        # combine in order: plugin -> project var -> env
-        if input_json_file:
-            input_json += input_json_file
-            flag = 1
-            if input_json_proj or input_json_env:
-                input_json += ','
-        if input_json_proj:
-            input_json += input_json_proj
-            flag = 1
-            if input_json_env:
-                input_json += ','
-        if input_json_env:
-            input_json += input_json_env
-            flag = 1
+        # Combine settings fragments in a robust way instead of naive string concat.
+        # Each fragment may be:
+        #  - a dict with key 'SearchTabs' -> extract its list
+        #  - a dict that itself is a single tab config (has 'Title') -> wrap as [dict]
+        #  - a list of tab configs -> use directly
+        def _extract_tabs(fragment_text):
+            if not fragment_text:
+                return []
+            # Try direct parse, but support legacy fragments that are
+            # multiple top-level objects separated by commas (not a valid
+            # single JSON document). In that case, try wrapping in [] and
+            # parse as an array.
+            try:
+                obj = json.loads(fragment_text)
+            except Exception:
+                try:
+                    obj = json.loads(f"[{fragment_text}]")
+                except Exception:
+                    return []
+            # dict with SearchTabs
+            if isinstance(obj, dict):
+                if isinstance(obj.get('SearchTabs'), list):
+                    return obj.get('SearchTabs')
+                # single tab dict
+                if 'Title' in obj:
+                    return [obj]
+                # unknown dict shape
+                return []
+            # list of tabs
+            if isinstance(obj, list):
+                return obj
+            return []
 
-        # 設定終了
-        input_json += '],"PageLimit": 10000}'
-        # メッセージ表示
-        # QMessageBox.information(None, "JSON設定", input_json , QMessageBox.Yes)
+        combined_tabs = []
+        try:
+            if input_json_file:
+                combined_tabs.extend(_extract_tabs(input_json_file))
+            if input_json_proj:
+                combined_tabs.extend(_extract_tabs(input_json_proj))
+            if input_json_env:
+                combined_tabs.extend(_extract_tabs(input_json_env))
+        except Exception:
+            combined_tabs = []
+
+        if combined_tabs:
+            flag = 1
 
         if flag == 1:
-            # テキストをJSONとして読込
-            settings = json.loads(input_json)
-
-            # メッセージ表示
-            # QMessageBox.information(None, "create_search_dialog", "JSON読込", QMessageBox.Yes)
+            # Build canonical settings dict
+            settings = {
+                'SearchTabs': combined_tabs,
+                'PageLimit': 10000,
+            }
 
             self.dialog = SearchDialog(settings, parent=self.iface.mainWindow(), iface=self.iface)
             # Defensive: nudge dialog layout and resize any tables so headers don't
