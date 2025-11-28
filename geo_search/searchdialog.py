@@ -21,6 +21,66 @@ from .constants import OTHER_GROUP_NAME
 UI_FILE = "dialog.ui"
 
 
+def set_project_variable(project, key, value, group='GEO-search-plugin'):
+    """Robustly set a project-scoped variable across QGIS versions.
+
+    Tries multiple methods for compatibility: QgsExpressionContextUtils.setProjectVariable,
+    projectScope().setVariable, project.writeEntry, project.setCustomProperty.
+    Returns True if any method succeeded.
+    """
+    ok = False
+    try:
+        from qgis.core import QgsExpressionContextUtils
+    except Exception:
+        QgsExpressionContextUtils = None
+
+    # 1) try class-level API
+    try:
+        if QgsExpressionContextUtils is not None:
+            try:
+                QgsExpressionContextUtils.setProjectVariable(project, key, value)
+                ok = True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 2) try projectScope().setVariable
+    try:
+        if QgsExpressionContextUtils is not None:
+            try:
+                scope = QgsExpressionContextUtils.projectScope(project)
+                if hasattr(scope, 'setVariable'):
+                    scope.setVariable(key, value)
+                    ok = True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 3) try writeEntry
+    try:
+        try:
+            project.writeEntry(group, key, value)
+            ok = True
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # 4) try setCustomProperty
+    try:
+        try:
+            project.setCustomProperty(f"{group}:{key}", value)
+            ok = True
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    return ok
+
+
 class SearchDialog(QDialog):
     def __init__(self, setting, parent=None, iface=None):
         super(SearchDialog, self).__init__(parent=parent)
@@ -504,64 +564,27 @@ class SearchDialog(QDialog):
             # route write according to user's selection
             try:
                 if save_target == 'project' or save_target is None:
-                    # write back into project variables: try all available methods for maximum compatibility
-                    wrote = False
+                    # write back into project variables using centralized helper
                     try:
-                        # Prefer API to set project variable so it appears in Project→Properties→Variables
-                        from qgis.core import QgsExpressionContextUtils, QgsMessageLog
-                        
-                        # Method 1: setProjectVariable
-                        try:
-                            QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
-                            wrote = True
-                            read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
-                            QgsMessageLog.logMessage(f"Set project variable (project scope): {str(read_back)}", "GEO-search-plugin", 0)
-                            print(f"Set project variable via setProjectVariable: {str(read_back)}")
-                        except Exception as err:
-                            print(f"setProjectVariable failed: {err}")
-                        
-                        # Method 2: writeEntry - always try this too
-                        try:
-                            project.writeEntry('GEO-search-plugin', 'value', new_value)
-                            wrote = True
-                            ok, val = project.readEntry('GEO-search-plugin', 'value')
-                            QgsMessageLog.logMessage(f"Wrote via writeEntry ok={ok} val={val}", "GEO-search-plugin", 0)
-                            print(f"Wrote via writeEntry ok={ok} val={val}")
-                        except Exception as err:
-                            print(f"writeEntry failed: {err}")
-                        
-                        # Method 3: setCustomProperty - always try this too
-                        try:
-                            project.setCustomProperty('GEO-search-plugin', new_value)
-                            pv = project.customProperty('GEO-search-plugin')
-                            QgsMessageLog.logMessage(f"Set customProperty: {str(pv)}", "GEO-search-plugin", 0)
-                            print(f"Set customProperty: {str(pv)}")
-                        except Exception as err:
-                            print(f"setCustomProperty failed: {err}")
-                            
-                        # プロジェクトの自動保存は行わない（ユーザーが必要なときに保存する）
-                        print("Project variable updated, but project not auto-saved")
-                    except Exception:
-                        try:
-                            # best-effort: try the old writeEntry then customProperty
-                            project.writeEntry('GEO-search-plugin', 'value', new_value)
+                        ok = set_project_variable(project, 'GEO-search-plugin', new_value)
+                        if not ok:
                             try:
                                 from qgis.core import QgsMessageLog
-                                ok, val = project.readEntry('GEO-search-plugin', 'value')
-                                QgsMessageLog.logMessage(f"Wrote via writeEntry ok={ok} val={val}", "GEO-search-plugin", 0)
+                                QgsMessageLog.logMessage("set_project_variable returned False when writing GEO-search-plugin", "GEO-search-plugin", 1)
                             except Exception:
-                                print("Wrote via writeEntry (fallback)")
-                        except Exception:
+                                print("set_project_variable returned False when writing GEO-search-plugin")
+                        else:
                             try:
-                                project.setCustomProperty('GEO-search-plugin', new_value)
-                                try:
-                                    from qgis.core import QgsMessageLog
-                                    pv = project.customProperty('GEO-search-plugin')
-                                    QgsMessageLog.logMessage(f"Set customProperty (fallback): {str(pv)}", "GEO-search-plugin", 0)
-                                except Exception:
-                                    print('Set customProperty (fallback)')
+                                from qgis.core import QgsExpressionContextUtils, QgsMessageLog
+                                read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
+                                QgsMessageLog.logMessage(f"Wrote project variable via helper: {str(read_back)}", "GEO-search-plugin", 0)
                             except Exception:
                                 pass
+                    except Exception:
+                        try:
+                            project.setCustomProperty('GEO-search-plugin', new_value)
+                        except Exception:
+                            pass
                 elif save_target == 'setting_json':
                     # write the single tab as an entry into plugin setting.json
                     try:
@@ -574,14 +597,14 @@ class SearchDialog(QDialog):
                     except Exception as e:
                         print(f"Failed to write to geo_search_json file: {e}")
                 else:
-                    # default to project variable
+                    # default to project variable via helper
                     try:
-                        QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
+                        set_project_variable(project, 'GEO-search-plugin', new_value)
                     except Exception:
                         try:
-                            project.writeEntry('GEO-search-plugin', 'value', new_value)
-                        except Exception:
                             project.setCustomProperty('GEO-search-plugin', new_value)
+                        except Exception:
+                            pass
             except Exception as e:
                 try:
                     from qgis.core import QgsMessageLog
@@ -761,42 +784,21 @@ class SearchDialog(QDialog):
                 else:
                     new_value = json.dumps(updated_settings, ensure_ascii=False)
                 
-                # プロジェクト変数を更新
-                # Method 1: setProjectVariable
+                # プロジェクト変数を更新（統一ヘルパーを使用）
                 try:
-                    QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
-                    read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
+                    ok = set_project_variable(project, 'GEO-search-plugin', new_value)
+                    if not ok:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage("set_project_variable returned False when removing tab", "GEO-search-plugin", 1)
+                        except Exception:
+                            print("set_project_variable returned False when removing tab")
+                except Exception as e:
                     try:
                         from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Updated project variable after removing tab: {str(read_back)}", "GEO-search-plugin", 0)
+                        QgsMessageLog.logMessage(f"Error updating project variable: {e}", "GEO-search-plugin", 1)
                     except Exception:
-                        print(f"Updated project variable after removing tab: {str(read_back)}")
-                except Exception as err:
-                    print(f"setProjectVariable failed: {err}")
-                
-                # Method 2: writeEntry
-                try:
-                    project.writeEntry('GEO-search-plugin', 'value', new_value)
-                    ok, val = project.readEntry('GEO-search-plugin', 'value')
-                    try:
-                        from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Wrote via writeEntry after removing tab ok={ok} val={val}", "GEO-search-plugin", 0)
-                    except Exception:
-                        print(f"Wrote via writeEntry after removing tab ok={ok} val={val}")
-                except Exception as err:
-                    print(f"writeEntry failed: {err}")
-                
-                # Method 3: setCustomProperty
-                try:
-                    project.setCustomProperty('GEO-search-plugin', new_value)
-                    pv = project.customProperty('GEO-search-plugin')
-                    try:
-                        from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Set customProperty after removing tab: {str(pv)}", "GEO-search-plugin", 0)
-                    except Exception:
-                        print(f"Set customProperty after removing tab: {str(pv)}")
-                except Exception as err:
-                    print(f"setCustomProperty failed: {err}")
+                        print(f"Error updating project variable: {e}")
                     
                 # No tab_id_mapping to clear since ID-based mapping was removed.
                 
@@ -1681,13 +1683,52 @@ class SearchDialog(QDialog):
                 pass
 
             if not path:
-                QMessageBox.warning(self, self.tr("geo_search_json"), self.tr("No geo_search_json path configured (env/project variable)."))
+                # If no geo_search_json configured, create a default file
+                # next to the current project with name <project>_search.json.
                 try:
-                    from qgis.core import QgsMessageLog
-                    QgsMessageLog.logMessage("_write_to_geo_search_json: no path configured", 'GEO-search-plugin', 2)
+                    from qgis.core import QgsProject, QgsExpressionContextUtils, QgsMessageLog
+                    proj = QgsProject.instance()
+                    proj_file = proj.fileName() or ''
+                    if proj_file:
+                        proj_dir = os.path.dirname(proj_file)
+                        proj_base = os.path.splitext(os.path.basename(proj_file))[0]
+                        default_name = f"{proj_base}_search.json"
+                        path = os.path.join(proj_dir, default_name)
+
+                        # Persist the chosen path into project variable so next time
+                        # the same location is used. Use the centralized helper for robustness.
+                        try:
+                            ok = set_project_variable(proj, 'geo_search_json', path)
+                            if not ok:
+                                try:
+                                    from qgis.core import QgsMessageLog
+                                    QgsMessageLog.logMessage(f"Failed to persist geo_search_json to project variables for path={path}", 'GEO-search-plugin', 1)
+                                except Exception:
+                                    print(f"Failed to persist geo_search_json to project variables for path={path}")
+                        except Exception:
+                            pass
+
+                        try:
+                            QgsMessageLog.logMessage(f"_write_to_geo_search_json: no path configured, using default {path}", 'GEO-search-plugin', 0)
+                        except Exception:
+                            print(f"_write_to_geo_search_json: no path configured, using default {path}")
+                    else:
+                        # Unsaved project: fallback to plugin directory
+                        plugin_dir = os.path.dirname(__file__)
+                        path = os.path.join(plugin_dir, 'untitled_search.json')
+                        try:
+                            QgsMessageLog.logMessage(f"_write_to_geo_search_json: unsaved project, using fallback {path}", 'GEO-search-plugin', 1)
+                        except Exception:
+                            print(f"_write_to_geo_search_json: unsaved project, using fallback {path}")
                 except Exception:
-                    print("_write_to_geo_search_json: no path configured")
-                return
+                    # As a last resort, inform user and abort write
+                    QMessageBox.warning(self, self.tr("geo_search_json"), self.tr("No geo_search_json path configured and failed to create default path."))
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage("_write_to_geo_search_json: no path configured and failed to create default", 'GEO-search-plugin', 2)
+                    except Exception:
+                        print("_write_to_geo_search_json: no path configured and failed to create default")
+                    return
 
             # ensure directory exists
             d = os.path.dirname(path)
