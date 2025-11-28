@@ -334,9 +334,61 @@ class SettingsDialog(QDialog):
     def _browse_geo_search_json(self):
         """ファイル選択ダイアログで geo_search_json のファイルを選択する。"""
         try:
-            start_dir = os.path.dirname(__file__)
-        except Exception:
             start_dir = ""
+            # 現在のテキストから有効なファイルを解決する（プロジェクト相対も考慮）
+            cur = ""
+            try:
+                cur = str(self.geo_line.text()).strip()
+            except Exception:
+                cur = ""
+
+            resolved = None
+            if cur:
+                try:
+                    # 絶対パスで存在するか
+                    if os.path.isabs(cur) and os.path.exists(cur):
+                        resolved = os.path.abspath(cur)
+                    else:
+                        # プロジェクトのフォルダを基準に解決してみる
+                        try:
+                            from qgis.core import QgsProject
+                            proj = QgsProject.instance()
+                            proj_file = proj.fileName() or ""
+                            proj_dir = os.path.dirname(proj_file) if proj_file else ""
+                        except Exception:
+                            proj_dir = ""
+                        if proj_dir:
+                            cand = os.path.join(proj_dir, cur)
+                            if os.path.exists(cand):
+                                resolved = os.path.abspath(cand)
+                        # それでも見つからなければカレントからの相対も試す
+                        if not resolved and os.path.exists(cur):
+                            resolved = os.path.abspath(cur)
+                except Exception:
+                    resolved = None
+
+            if resolved:
+                start_dir = os.path.dirname(resolved)
+            else:
+                # 指定ファイルがない場合はプロジェクトフォルダを初期ディレクトリにする
+                try:
+                    from qgis.core import QgsProject
+                    proj = QgsProject.instance()
+                    proj_file = proj.fileName() or ""
+                    if proj_file:
+                        start_dir = os.path.dirname(proj_file)
+                except Exception:
+                    # フォールバック
+                    try:
+                        start_dir = os.path.dirname(__file__)
+                    except Exception:
+                        start_dir = ""
+        except Exception:
+            try:
+                start_dir = os.path.dirname(__file__)
+            except Exception:
+                start_dir = ""
+
         try:
             path, _ = QFileDialog.getOpenFileName(self, self.tr("Select settings file"), start_dir, "JSON files (*.json);;All files (*)")
         except Exception:
