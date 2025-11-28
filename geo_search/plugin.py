@@ -1017,13 +1017,66 @@ class plugin(object):
             except Exception:
                 pass
 
-        # setting.jsonの読込
-        if os.path.exists(os.path.join(os.path.dirname(__file__), "setting.json")):
-            setting_path = os.path.join(os.path.dirname(__file__), "setting.json")
-            # ファイルから読込
-            with open(setting_path) as f:
-                # テキストとして読込
-                input_json_file = f.read()
+        # setting.jsonの読込（環境変数 `geo_search_json` を優先）
+        input_json_file = ""
+        try:
+            env_name = os.environ.get('geo_search_json')
+        except Exception:
+            env_name = None
+
+        setting_path = None
+        if env_name:
+            try:
+                if os.path.isabs(env_name):
+                    candidate = env_name
+                else:
+                    candidate = os.path.join(os.path.dirname(__file__), env_name)
+                if os.path.exists(candidate):
+                    setting_path = candidate
+                    try:
+                        with open(setting_path, 'r', encoding='utf-8') as f:
+                            input_json_file = f.read()
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Loaded settings file from env geo_search_json: {setting_path}", "GEO-search-plugin", 0)
+                    except Exception as e:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Failed to read env-specified settings file '{candidate}': {e}", "GEO-search-plugin", 2)
+                        except Exception:
+                            try:
+                                print(f"Failed to read env-specified settings file '{candidate}': {e}")
+                            except Exception:
+                                pass
+                else:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Env-specified settings file not found: {candidate}", "GEO-search-plugin", 1)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # 環境変数で見つからなかった場合はデフォルトの setting.json を使用
+        if not setting_path:
+            default_path = os.path.join(os.path.dirname(__file__), "setting.json")
+            if os.path.exists(default_path):
+                try:
+                    with open(default_path, 'r', encoding='utf-8') as f:
+                        input_json_file = f.read()
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"Loaded default settings file: {default_path}", "GEO-search-plugin", 0)
+                except Exception as e:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Failed to read default settings file '{default_path}': {e}", "GEO-search-plugin", 2)
+                    except Exception:
+                        pass
+            else:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("No settings file found in plugin directory; relying on project variables only.", "GEO-search-plugin", 1)
+                except Exception:
+                    pass
 
         # プロジェクト変数から追加読込
         # 変数名 GEO-search-plugin
@@ -1034,16 +1087,53 @@ class plugin(object):
             ProjectInstance.reloadAllLayers()
         except Exception:
             pass
+
+        # Ensure project variable 'geo_search_json' exists.
+        # Use legacy `writeEntry` only (per request).
+        try:
+            from qgis.core import QgsExpressionContextUtils, QgsMessageLog
+            try:
+                proj_scope = QgsExpressionContextUtils.projectScope(ProjectInstance)
+            except Exception:
+                proj_scope = None
+
+            try:
+                vars = ProjectInstance.customVariables()
+                has_var = 'geo_search_json' in (vars or {})
+            except Exception:
+                has_var = False
+
+            if not has_var:
+                try:
+                    QgsExpressionContextUtils.setProjectVariable(ProjectInstance, 'geo_search_json', '')
+                    QgsMessageLog.logMessage("Created project variable 'geo_search_json' via QgsExpressionContextUtils.setProjectVariable", "GEO-search-plugin", 0)
+                except Exception as e:
+                    try:
+                        QgsMessageLog.logMessage(f"Failed to create project variable 'geo_search_json' via setProjectVariable: {e}", "GEO-search-plugin", 2)
+                    except Exception:
+                        pass
+
+            # Also set runtime projectScope variable if available (non-persistent runtime)
+            try:
+                if proj_scope is not None and hasattr(proj_scope, 'setVariable'):
+                    try:
+                        proj_scope.setVariable('geo_search_json', '')
+                        QgsMessageLog.logMessage("Set projectScope variable 'geo_search_json' to empty string", "GEO-search-plugin", 0)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            pass
             
         # テキストとして読込 - 複数の方法を試す
         try:
-            ctx_var = QgsExpressionContextUtils.projectScope(ProjectInstance).variable(
-                "GEO-search-plugin"
-            )
+            # read project variable set via setProjectVariable / projectScope
+            ctx_var = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('geo_search_json')
         except Exception:
             ctx_var = None
 
-        if ctx_var is not None:
+        if ctx_var is not None and ctx_var != "":
             input_json_variable = ctx_var
             # 設定読み込みの診断ログ (QGIS メッセージログに出力)
             try:
@@ -1052,35 +1142,6 @@ class plugin(object):
             except Exception:
                 try:
                     print(f"Found variable from projectScope: {ctx_var}")
-                except Exception:
-                    pass
-        else:
-            # fallback: try readEntry / custom property
-            try:
-                ok, val = ProjectInstance.readEntry('GEO-search-plugin', 'value')
-                if ok:
-                    input_json_variable = val
-                    try:
-                        from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Found variable from readEntry: {val}", "GEO-search-plugin", 0)
-                    except Exception:
-                        try:
-                            print(f"Found variable from readEntry: {val}")
-                        except Exception:
-                            pass
-            except Exception:
-                try:
-                    pv = ProjectInstance.customProperty('GEO-search-plugin')
-                    if pv is not None:
-                        input_json_variable = pv
-                        try:
-                            from qgis.core import QgsMessageLog
-                            QgsMessageLog.logMessage(f"Found variable from customProperty: {pv}", "GEO-search-plugin", 0)
-                        except Exception:
-                            try:
-                                print(f"Found variable from customProperty: {pv}")
-                            except Exception:
-                                pass
                 except Exception:
                     pass
 

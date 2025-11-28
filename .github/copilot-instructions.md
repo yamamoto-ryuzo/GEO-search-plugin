@@ -16,7 +16,7 @@ demoを作成するときはdemoフォルダに作成のこと。
 QT6専用のプラグインとして作成すること。  
 メタデータには以下を必ず記載のこと。   
  qgisMinimumVersion=3.40  
- qgisMaximumVersion=3.999  
+ qgisMaximumVersion=3.99  
  required_qt_version=6  
 UIは、Qt Designerの.uiファイル方式すること。  
 標準言語は英語として、PYの動作説明のコメントだけは日本語で作成のこと。    
