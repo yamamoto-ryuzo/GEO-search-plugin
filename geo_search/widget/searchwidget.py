@@ -152,7 +152,24 @@ class SearchWidget(QWidget):
                     short = 'setting.json'
                 else:
                     short = str(src)
-                src_text = f"[{short}]"
+
+                # Include source index when available (e.g. [setting.json #3])
+                idx = None
+                try:
+                    if isinstance(self.setting, dict):
+                        idx = self.setting.get('_source_index')
+                except Exception:
+                    idx = None
+
+                if idx is not None and str(idx).strip() != '':
+                    try:
+                        # format as integer when possible
+                        idx_display = int(idx)
+                    except Exception:
+                        idx_display = idx
+                    src_text = f"[{short} #{idx_display}]"
+                else:
+                    src_text = f"[{short}]"
         except Exception:
             src_text = ""
 
