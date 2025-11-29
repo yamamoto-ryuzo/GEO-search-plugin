@@ -82,8 +82,10 @@ class SearchWidget(QWidget):
 
     def _angle_scale_layout(self):
         """Return a QHBoxLayout containing angle and scale labels based on self.setting."""
-        from qgis.PyQt.QtWidgets import QLabel, QHBoxLayout
+        # Use a vertical layout: angle/scale on top row, source label on second row.
+        from qgis.PyQt.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout
 
+        v = QVBoxLayout()
         h = QHBoxLayout()
         try:
             angle = self.setting.get('angle') if isinstance(self.setting, dict) else None
@@ -128,7 +130,42 @@ class SearchWidget(QWidget):
             h.addItem(spacer)
         except Exception:
             pass
-        return h
+
+        v.addLayout(h)
+
+        # Per-tab source label shown under the angle/scale row.
+        try:
+            src = None
+            if isinstance(self.setting, dict):
+                src = self.setting.get('_source')
+        except Exception:
+            src = None
+
+        src_text = ""
+        try:
+            if src:
+                if src == 'geo_search_json':
+                    short = 'geo_search_json'
+                elif src == 'project variable':
+                    short = 'project variable'
+                elif src == 'setting.json':
+                    short = 'setting.json'
+                else:
+                    short = str(src)
+                src_text = f"[{short}]"
+        except Exception:
+            src_text = ""
+
+        src_label = QLabel(src_text)
+        src_label.setStyleSheet("color: #666666; font-size: 10px;")
+        try:
+            from qgis.PyQt.QtCore import Qt
+            src_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        except Exception:
+            pass
+
+        v.addWidget(src_label)
+        return v
 
 
 # 通常検索

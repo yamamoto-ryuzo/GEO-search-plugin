@@ -105,14 +105,16 @@ class SearchDialog(QDialog):
         # create Page
         for i, tab_setting in enumerate(setting["SearchTabs"]):
             page = self.create_page(tab_setting)
-            
+            # Tab title: use configured Title only (source marker shown under angle display)
+            display_title = tab_setting.get("Title") if isinstance(tab_setting, dict) else str(tab_setting)
+
             # Do not use per-tab "id" mapping. Rely on Title and group for matching.
             if self.tab_groups:
-                group_name = tab_setting.get("group", OTHER_GROUP_NAME)
+                group_name = tab_setting.get("group", OTHER_GROUP_NAME) if isinstance(tab_setting, dict) else OTHER_GROUP_NAME
                 tab_group_widget = self.tab_groups[group_name]
-                tab_index = tab_group_widget.addTab(page, self.tr(tab_setting["Title"]))
+                tab_index = tab_group_widget.addTab(page, self.tr(display_title))
             else:
-                tab_index = self.tabWidget.addTab(page, self.tr(tab_setting["Title"]))
+                tab_index = self.tabWidget.addTab(page, self.tr(display_title))
             
             # 親のプラグインインスタンスがある場合、current_layersリストを更新
             try:
@@ -194,47 +196,6 @@ class SearchDialog(QDialog):
                 for i in range(group_widget.count())
             ]
         return [self.tabWidget.widget(i) for i in range(self.tabWidget.count())]
-
-    def get_current_search_widget(self):
-        """Return the widget instance for the currently visible/search tab (handles grouped tabs)."""
-        try:
-            # If grouped tabs exist, get inner widget
-            if getattr(self, 'tab_groups', None):
-                group_index = self.tabWidget.currentIndex()
-                group_widget = self.tabWidget.widget(group_index)
-                # group_widget may itself be a QTabWidget
-                try:
-                    from qgis.PyQt.QtWidgets import QTabWidget
-                    if isinstance(group_widget, QTabWidget):
-                        tab_index = group_widget.currentIndex()
-                        if tab_index >= 0:
-                            return group_widget.widget(tab_index)
-                except Exception:
-                    pass
-                # fallback: if group_widget is a page, return it
-                return group_widget
-
-            # no grouped tabs: return current top-level page
-            idx = self.tabWidget.currentIndex()
-            if idx >= 0:
-                return self.tabWidget.widget(idx)
-        except Exception:
-            pass
-        return None
-
-    def get_search_values(self):
-        """Return the current search input(s) for the visible tab.
-
-        Returns:
-          - dict (ViewName->value) if mapping possible
-          - list of values otherwise
-          - {'value': ...} for single-line widgets
-        """
-        widget = self.get_current_search_widget()
-        if widget is None:
-            return {}
-
-        # Case 1: widgets with search_widgets (SearchTextWidget family)
         try:
             if hasattr(widget, 'search_widgets') and isinstance(widget.search_widgets, (list, tuple)):
                 values = []

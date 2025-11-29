@@ -1107,6 +1107,7 @@ class plugin(object):
         except Exception:
             pass
 
+        env_candidate = None
         if env_name:
             try:
                 # resolve candidate path: if absolute use it, otherwise attempt project-dir then plugin-dir
@@ -1124,6 +1125,7 @@ class plugin(object):
                     else:
                         candidate = os.path.join(os.path.dirname(__file__), env_name)
 
+                env_candidate = candidate
                 if os.path.exists(candidate):
                     try:
                         with open(candidate, 'r', encoding='utf-8') as f:
@@ -1181,11 +1183,30 @@ class plugin(object):
         combined_tabs = []
         try:
             if input_json_file:
-                combined_tabs.extend(_extract_tabs(input_json_file))
+                for t in _extract_tabs(input_json_file):
+                    try:
+                        # mark source for UI display
+                        if isinstance(t, dict):
+                            t['_source'] = 'setting.json'
+                    except Exception:
+                        pass
+                    combined_tabs.append(t)
             if input_json_proj:
-                combined_tabs.extend(_extract_tabs(input_json_proj))
+                for t in _extract_tabs(input_json_proj):
+                    try:
+                        if isinstance(t, dict):
+                            t['_source'] = 'project variable'
+                    except Exception:
+                        pass
+                    combined_tabs.append(t)
             if input_json_env:
-                combined_tabs.extend(_extract_tabs(input_json_env))
+                for t in _extract_tabs(input_json_env):
+                    try:
+                        if isinstance(t, dict):
+                            t['_source'] = 'geo_search_json'
+                    except Exception:
+                        pass
+                    combined_tabs.append(t)
         except Exception:
             combined_tabs = []
 
@@ -1200,6 +1221,8 @@ class plugin(object):
             }
 
             self.dialog = SearchDialog(settings, parent=self.iface.mainWindow(), iface=self.iface)
+            # If dialog supports showing the settings source, pass a combined description
+            # no bottom combined source label (was removed)
             # Defensive: nudge dialog layout and resize any tables so headers don't
             # collapse to zero width on some platforms (Qt6 style differences).
             try:
