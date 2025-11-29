@@ -45,3 +45,52 @@ def get_feature_by_id(layer, feature_id):
 
 
 # `parse_theme_group` と `group_themes` は `geo_search.theme` に移しました。
+
+
+def set_project_variable(project, key, value, group='GEO-search-plugin'):
+    """Robustly set a project-scoped variable across QGIS versions.
+
+    Tries multiple methods for compatibility: QgsExpressionContextUtils.setProjectVariable,
+    projectScope().setVariable, project.writeEntry, project.setCustomProperty.
+    Returns True if any method succeeded.
+    """
+    ok = False
+    try:
+        from qgis.core import QgsExpressionContextUtils
+    except Exception:
+        QgsExpressionContextUtils = None
+
+    # 1) try class-level API
+    try:
+        if QgsExpressionContextUtils is not None:
+            try:
+                QgsExpressionContextUtils.setProjectVariable(project, key, value)
+                ok = True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 2) try projectScope().setVariable
+    try:
+        if QgsExpressionContextUtils is not None:
+            try:
+                scope = QgsExpressionContextUtils.projectScope(project)
+                if hasattr(scope, 'setVariable'):
+                    scope.setVariable(key, value)
+                    ok = True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 3) try writeEntry
+    try:
+        try:
+            project.writeEntry(group, key, value)
+            ok = True
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return ok

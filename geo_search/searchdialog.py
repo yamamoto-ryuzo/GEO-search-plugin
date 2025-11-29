@@ -20,65 +20,7 @@ from .constants import OTHER_GROUP_NAME
 
 UI_FILE = "dialog.ui"
 
-
-def set_project_variable(project, key, value, group='GEO-search-plugin'):
-    """Robustly set a project-scoped variable across QGIS versions.
-
-    Tries multiple methods for compatibility: QgsExpressionContextUtils.setProjectVariable,
-    projectScope().setVariable, project.writeEntry, project.setCustomProperty.
-    Returns True if any method succeeded.
-    """
-    ok = False
-    try:
-        from qgis.core import QgsExpressionContextUtils
-    except Exception:
-        QgsExpressionContextUtils = None
-
-    # 1) try class-level API
-    try:
-        if QgsExpressionContextUtils is not None:
-            try:
-                QgsExpressionContextUtils.setProjectVariable(project, key, value)
-                ok = True
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # 2) try projectScope().setVariable
-    try:
-        if QgsExpressionContextUtils is not None:
-            try:
-                scope = QgsExpressionContextUtils.projectScope(project)
-                if hasattr(scope, 'setVariable'):
-                    scope.setVariable(key, value)
-                    ok = True
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # 3) try writeEntry
-    try:
-        try:
-            project.writeEntry(group, key, value)
-            ok = True
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-    # 4) try setCustomProperty
-    try:
-        try:
-            project.setCustomProperty(f"{group}:{key}", value)
-            ok = True
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-    return ok
+from .utils import set_project_variable
 
 
 class SearchDialog(QDialog):
@@ -580,11 +522,12 @@ class SearchDialog(QDialog):
                                 QgsMessageLog.logMessage(f"Wrote project variable via helper: {str(read_back)}", "GEO-search-plugin", 0)
                             except Exception:
                                 pass
-                    except Exception:
+                    except Exception as err:
                         try:
-                            project.setCustomProperty('GEO-search-plugin', new_value)
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Error while persisting via set_project_variable: {err}", "GEO-search-plugin", 1)
                         except Exception:
-                            pass
+                            print(f"Error while persisting via set_project_variable: {err}")
                 elif save_target == 'setting_json':
                     # write the single tab as an entry into plugin setting.json
                     try:
@@ -599,12 +542,19 @@ class SearchDialog(QDialog):
                 else:
                     # default to project variable via helper
                     try:
-                        set_project_variable(project, 'GEO-search-plugin', new_value)
-                    except Exception:
+                        ok = set_project_variable(project, 'GEO-search-plugin', new_value)
+                        if not ok:
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage("set_project_variable returned False when writing GEO-search-plugin (default route)", "GEO-search-plugin", 1)
+                            except Exception:
+                                print("set_project_variable returned False when writing GEO-search-plugin (default route)")
+                    except Exception as err:
                         try:
-                            project.setCustomProperty('GEO-search-plugin', new_value)
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Error while persisting via set_project_variable (default route): {err}", "GEO-search-plugin", 1)
                         except Exception:
-                            pass
+                            print(f"Error while persisting via set_project_variable (default route): {err}")
             except Exception as e:
                 try:
                     from qgis.core import QgsMessageLog
@@ -2323,41 +2273,28 @@ class SearchDialog(QDialog):
                     return
 
                 if save_target == 'project':
-                    # Method 1: setProjectVariable
+                    # Use centralized helper to persist project-scoped setting
                     try:
-                        QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
-                        read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
+                        ok = set_project_variable(project, 'GEO-search-plugin', new_value)
+                        if not ok:
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage("set_project_variable returned False when writing GEO-search-plugin", "GEO-search-plugin", 1)
+                            except Exception:
+                                print("set_project_variable returned False when writing GEO-search-plugin")
+                        else:
+                            try:
+                                from qgis.core import QgsExpressionContextUtils, QgsMessageLog
+                                read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
+                                QgsMessageLog.logMessage(f"Updated project variable via helper: {str(read_back)}", "GEO-search-plugin", 0)
+                            except Exception:
+                                pass
+                    except Exception as err:
                         try:
                             from qgis.core import QgsMessageLog
-                            QgsMessageLog.logMessage(f"Updated project variable: {str(read_back)}", "GEO-search-plugin", 0)
+                            QgsMessageLog.logMessage(f"Error while persisting via set_project_variable: {err}", "GEO-search-plugin", 1)
                         except Exception:
-                            print(f"Updated project variable: {str(read_back)}")
-                    except Exception as err:
-                        print(f"setProjectVariable failed: {err}")
-
-                    # Method 2: writeEntry
-                    try:
-                        project.writeEntry('GEO-search-plugin', 'value', new_value)
-                        ok, val = project.readEntry('GEO-search-plugin', 'value')
-                        try:
-                            from qgis.core import QgsMessageLog
-                            QgsMessageLog.logMessage(f"Wrote via writeEntry ok={ok} val={val}", "GEO-search-plugin", 0)
-                        except Exception:
-                            print(f"Wrote via writeEntry ok={ok} val={val}")
-                    except Exception as err:
-                        print(f"writeEntry failed: {err}")
-
-                    # Method 3: setCustomProperty
-                    try:
-                        project.setCustomProperty('GEO-search-plugin', new_value)
-                        pv = project.customProperty('GEO-search-plugin')
-                        try:
-                            from qgis.core import QgsMessageLog
-                            QgsMessageLog.logMessage(f"Set customProperty: {str(pv)}", "GEO-search-plugin", 0)
-                        except Exception:
-                            print(f"Set customProperty: {str(pv)}")
-                    except Exception as err:
-                        print(f"setCustomProperty failed: {err}")
+                            print(f"Error while persisting via set_project_variable: {err}")
                 elif save_target == 'setting_json':
                     try:
                         self._write_to_setting_json(all_configs)
@@ -2370,12 +2307,19 @@ class SearchDialog(QDialog):
                         print(f"Failed to write to geo_search_json file: {e}")
                 else:
                     try:
-                        QgsExpressionContextUtils.setProjectVariable(project, 'GEO-search-plugin', new_value)
-                    except Exception:
+                        ok = set_project_variable(project, 'GEO-search-plugin', new_value)
+                        if not ok:
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage("set_project_variable returned False when writing GEO-search-plugin (update flow)", "GEO-search-plugin", 1)
+                            except Exception:
+                                print("set_project_variable returned False when writing GEO-search-plugin (update flow)")
+                    except Exception as e:
                         try:
-                            project.writeEntry('GEO-search-plugin', 'value', new_value)
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Error while persisting via set_project_variable (update flow): {e}", "GEO-search-plugin", 1)
                         except Exception:
-                            project.setCustomProperty('GEO-search-plugin', new_value)
+                            print(f"Error while persisting via set_project_variable (update flow): {e}")
 
             except Exception as e:
                 try:

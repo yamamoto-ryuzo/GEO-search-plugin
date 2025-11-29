@@ -7,6 +7,7 @@ from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPush
 from qgis.PyQt.QtWidgets import QInputDialog, QMessageBox, QComboBox, QFileDialog
 import os
 import re
+from .utils import set_project_variable
 
 
 class SettingsDialog(QDialog):
@@ -193,16 +194,22 @@ class SettingsDialog(QDialog):
             d = QFileDialog.getExistingDirectory(self, self.tr("Select export directory"), default_dir)
             if not d:
                 return
-            # 選択をプロジェクト変数に保存（writeEntry を優先、ダメなら setCustomProperty）
+            # 選択をプロジェクト変数に保存（集中ヘルパーを使用）
             try:
                 try:
-                    project.writeEntry(key_group, key_field, d)
-                except Exception:
-                    # writeEntry で失敗したら customProperty に保存
+                    ok = set_project_variable(project, key_field, d, group=key_group)
+                    if not ok:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Failed to persist {key_group}:{key_field} via helper", 'GEO-search-plugin', 1)
+                        except Exception:
+                            print(f"Failed to persist {key_group}:{key_field} via helper")
+                except Exception as e:
                     try:
-                        project.setCustomProperty(f"{key_group}:{key_field}", d)
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Error while persisting {key_group}:{key_field} via helper: {e}", 'GEO-search-plugin', 1)
                     except Exception:
-                        pass
+                        print(f"Error while persisting {key_group}:{key_field} via helper: {e}")
             except Exception:
                 pass
             exported = self.export_all_project_themes(d)
@@ -248,15 +255,22 @@ class SettingsDialog(QDialog):
             d = QFileDialog.getExistingDirectory(self, self.tr("Select import directory"), default_dir)
             if not d:
                 return
-            # 選択をプロジェクト変数に保存（writeEntry を優先、ダメなら setCustomProperty）
+            # 選択をプロジェクト変数に保存（集中ヘルパーを使用）
             try:
                 try:
-                    project.writeEntry(key_group, key_field, d)
-                except Exception:
+                    ok = set_project_variable(project, key_field, d, group=key_group)
+                    if not ok:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Failed to persist {key_group}:{key_field} via helper", 'GEO-search-plugin', 1)
+                        except Exception:
+                            print(f"Failed to persist {key_group}:{key_field} via helper")
+                except Exception as e:
                     try:
-                        project.setCustomProperty(f"{key_group}:{key_field}", d)
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Error while persisting {key_group}:{key_field} via helper: {e}", 'GEO-search-plugin', 1)
                     except Exception:
-                        pass
+                        print(f"Error while persisting {key_group}:{key_field} via helper: {e}")
             except Exception:
                 pass
             applied = self.import_themes_from_dir(d)
@@ -435,11 +449,21 @@ class SettingsDialog(QDialog):
                 except Exception:
                     save_val = path
 
-                QgsExpressionContextUtils.setProjectVariable(proj, 'geo_search_json', save_val)
                 try:
-                    QgsMessageLog.logMessage(f"Set project variable 'geo_search_json' to: {save_val}", 'GEO-search-plugin', 0)
+                    ok = set_project_variable(proj, 'geo_search_json', save_val)
+                    try:
+                        from qgis.core import QgsMessageLog
+                        if ok:
+                            QgsMessageLog.logMessage(f"Set project variable 'geo_search_json' to: {save_val}", 'GEO-search-plugin', 0)
+                        else:
+                            QgsMessageLog.logMessage(f"Failed to persist 'geo_search_json' via helper, attempted value: {save_val}", 'GEO-search-plugin', 1)
+                    except Exception:
+                        pass
                 except Exception:
-                    pass
+                    try:
+                        QgsMessageLog.logMessage(f"Failed to set project variable 'geo_search_json' via helper", 'GEO-search-plugin', 2)
+                    except Exception:
+                        pass
             except Exception as e:
                 try:
                     QgsMessageLog.logMessage(f"Failed to set project variable 'geo_search_json': {e}", 'GEO-search-plugin', 2)
