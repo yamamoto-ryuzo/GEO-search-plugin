@@ -2,32 +2,6 @@
 
 # Search Function (English)
 
-## Table of Contents
-
-- [Search Function (English)](#search-function-english)
-  - [Table of Contents](#table-of-contents)
-  - [Overview](#overview)
-  - [Subsystem Diagram and Boundaries (for developers)](#subsystem-diagram-and-boundaries-for-developers)
-  - [Parcel Number (Tiban) Search](#parcel-number-tiban-search)
-  - [General Attribute Search](#general-attribute-search)
-  - [Owner Search](#owner-search)
-  - [Search Logic (Implementation Overview)](#search-logic-implementation-overview)
-    - [Full-text-like Search](#full-text-like-search)
-    - [Parcel Number Search](#parcel-number-search)
-    - [Owner Search](#owner-search-1)
-    - [Displayed-Layer / All-Layers Search](#displayed-layer--all-layers-search)
-    - [Auxiliary Functions](#auxiliary-functions)
-  - [UI Settings Dialog](#ui-settings-dialog)
-  - [Configuration Items](#configuration-items)
-    - [Key Settings](#key-settings)
-    - [Behavior of View Fields](#behavior-of-view-fields)
-    - [Map Navigation After Selection](#map-navigation-after-selection)
-  - [Configuration Sources (Load Order) and Notes](#configuration-sources-load-order-and-notes)
-  - [Configuration File Description (Major Items)](#configuration-file-description-major-items)
-    - [Map Theme Feature (Overview)](#map-theme-feature-overview)
-  - [Issues and Notes](#issues-and-notes)
-  - [Reference Files](#reference-files)
-
 ## Overview
 
 This document describes the search subsystem of the GEO Search System. It covers behavior for parcel-number (Tiban) search, owner search, and general attribute searches, the search logic, tab settings, theme integration, and how the subsystem integrates with the overall system.
