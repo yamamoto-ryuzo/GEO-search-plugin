@@ -1180,33 +1180,67 @@ class plugin(object):
                 return obj
             return []
 
+        # Annotate each tab with its origin and load order so callers can
+        # identify the exact position within the original source when
+        # performing edits/deletions. We add two fields on each tab dict:
+        #  - '_source'        : one of 'setting.json'|'project variable'|'geo_search_json'
+        #  - '_source_index'  : integer index (0-based) position within that source
+        #  - '_load_sequence' : global sequence across all fragments (0-based)
         combined_tabs = []
         try:
+            file_idx = 0
+            proj_idx = 0
+            env_idx = 0
+            load_seq = 0
+
             if input_json_file:
                 for t in _extract_tabs(input_json_file):
                     try:
-                        # mark source for UI display
+                        # mark source for UI display and add indices
                         if isinstance(t, dict):
                             t['_source'] = 'setting.json'
+                            t['_source_index'] = int(file_idx)
+                            t['_load_sequence'] = int(load_seq)
                     except Exception:
                         pass
                     combined_tabs.append(t)
+                    try:
+                        file_idx += 1
+                        load_seq += 1
+                    except Exception:
+                        pass
+
             if input_json_proj:
                 for t in _extract_tabs(input_json_proj):
                     try:
                         if isinstance(t, dict):
                             t['_source'] = 'project variable'
+                            t['_source_index'] = int(proj_idx)
+                            t['_load_sequence'] = int(load_seq)
                     except Exception:
                         pass
                     combined_tabs.append(t)
+                    try:
+                        proj_idx += 1
+                        load_seq += 1
+                    except Exception:
+                        pass
+
             if input_json_env:
                 for t in _extract_tabs(input_json_env):
                     try:
                         if isinstance(t, dict):
                             t['_source'] = 'geo_search_json'
+                            t['_source_index'] = int(env_idx)
+                            t['_load_sequence'] = int(load_seq)
                     except Exception:
                         pass
                     combined_tabs.append(t)
+                    try:
+                        env_idx += 1
+                        load_seq += 1
+                    except Exception:
+                        pass
         except Exception:
             combined_tabs = []
 

@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 import os
 import json
+import shutil
+import tempfile
+import datetime
 from collections import OrderedDict
 
 from qgis.PyQt.QtWidgets import QDialog, QTabWidget, QTextEdit, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox
@@ -145,115 +148,146 @@ class SearchDialog(QDialog):
             return SearchOwnerWidget(setting)
         return SearchTextWidget(setting)
 
-    def create_tab_groups(self, search_tabs):
-        # Normalize input: accept dict, list of dicts, or nested lists produced
-        # by different sources (plugin setting.json, project var, env file).
+    def create_tab_groups(self, searchtabs):
+        """Create grouped tab containers when multiple groups are present.
+
+        Returns an OrderedDict mapping group name -> child QTabWidget.
+        If there is one or zero groups, returns an empty dict to keep
+        the simpler (ungrouped) tab layout.
+        """
         try:
-            if search_tabs is None:
-                return OrderedDict()
-            if isinstance(search_tabs, dict):
-                search_tabs = [search_tabs]
-            normalized = []
-            for st in search_tabs:
-                if isinstance(st, list):
-                    for s in st:
-                        if isinstance(s, dict):
-                            normalized.append(s)
-                elif isinstance(st, dict):
-                    normalized.append(st)
-                else:
-                    # skip unknown entries
+            groups = OrderedDict()
+            # collect group order as they appear
+            for t in (searchtabs or []):
+                try:
+                    g = t.get('group') if isinstance(t, dict) else None
+                except Exception:
+                    g = None
+                if not g:
+                    g = OTHER_GROUP_NAME
+                if g not in groups:
+                    groups[g] = None
+
+            # If only one group (or none), don't create grouped UI
+            if len(groups) <= 1:
+                return {}
+
+            created = OrderedDict()
+            for g in groups.keys():
+                try:
+                    page = QWidget()
+                    layout = QVBoxLayout(page)
+                    child_tabs = QTabWidget()
+                    layout.addWidget(child_tabs)
+                    # add group page to the main tabWidget
+                    try:
+                        self.tabWidget.addTab(page, self.tr(str(g)))
+                    except Exception:
+                        # fallback to raw text
+                        self.tabWidget.addTab(page, str(g))
+                    created[g] = child_tabs
+                except Exception:
                     continue
-            search_tabs = normalized
+            return created
         except Exception:
-            search_tabs = []
-
-        tab_groups = OrderedDict()
-        for search_tab in search_tabs:
-            # ensure each entry is a dict
-            if not isinstance(search_tab, dict):
-                try:
-                    from qgis.core import QgsMessageLog
-                    QgsMessageLog.logMessage(f"Skipping invalid tab entry (not dict): {repr(search_tab)}", "GEO-search-plugin", 1)
-                except Exception:
-                    print(f"Skipping invalid tab entry (not dict): {repr(search_tab)}")
-                continue
-            group_name = search_tab.get("group", OTHER_GROUP_NAME)
-            if group_name not in tab_groups:
-                group_widget = QTabWidget()
-                tab_groups[group_name] = group_widget
-        if len(tab_groups) <= 1 and OTHER_GROUP_NAME in tab_groups:
             return {}
-        for group_name, group_widget in tab_groups.items():
-            self.tabWidget.addTab(group_widget, self.tr(group_name))
-        return tab_groups
-
     def get_widgets(self):
-        if self.tab_groups:
-            return [
-                group_widget.widget(i)
-                for group_widget in self.tab_groups.values()
-                for i in range(group_widget.count())
-            ]
-        return [self.tabWidget.widget(i) for i in range(self.tabWidget.count())]
-        try:
-            if hasattr(widget, 'search_widgets') and isinstance(widget.search_widgets, (list, tuple)):
-                values = []
-                for w in widget.search_widgets:
+        """Return a list of page widgets in the same order as self.setting['SearchTabs'].
+
+        Matching is performed by comparing an optional '_load_sequence' marker kept on
+        each tab's setting dict (preferred), falling back to Title+group matching.
+        Returns None entries for tabs that could not be located.
+        """
+        result = []
+        used = set()
+
+        # Helper: yield all candidate page widgets in the UI
+        def all_pages():
+            # If grouped, pages live inside child QTabWidget instances placed on group pages
+            try:
+                if self.tab_groups:
+                    for grp, child_tab in self.tab_groups.items():
+                        try:
+                            for i in range(child_tab.count()):
+                                yield child_tab.widget(i)
+                        except Exception:
+                            continue
+                # also include any top-level tabs that are not group containers
+                for i in range(self.tabWidget.count()):
+                    page = self.tabWidget.widget(i)
+                    # if this page itself is a group container (we created it), skip
                     try:
-                        if hasattr(w, 'text'):
-                            values.append(w.text())
-                        else:
-                            values.append(None)
+                        # detect child QTabWidget
+                        from qgis.PyQt.QtWidgets import QTabWidget
+                        child = page.findChild(QTabWidget)
+                        if child is not None:
+                            # child tabs already yielded above
+                            continue
                     except Exception:
-                        values.append(None)
+                        pass
+                    yield page
+            except Exception:
+                return
 
-                # try to map to field names if setting describes them
-                try:
-                    fields = None
-                    if hasattr(widget, 'setting') and widget.setting:
-                        s = widget.setting
-                        if isinstance(s, dict):
-                            sf = s.get('SearchFields') or s.get('SearchField')
-                            if isinstance(sf, list):
-                                fields = [f.get('ViewName') or f.get('Field') for f in sf]
-                            elif isinstance(sf, dict):
-                                fields = [sf.get('ViewName') or sf.get('Field')]
-                    if fields and len(fields) == len(values):
-                        return {k: v for k, v in zip(fields, values)}
-                except Exception:
-                    pass
+        # Build a mapping from '_load_sequence' -> widget for fast lookup
+        seq_map = {}
+        title_map = {}
+        for p in all_pages():
+            try:
+                if p is None:
+                    continue
+                if hasattr(p, 'setting') and isinstance(p.setting, dict):
+                    seq = p.setting.get('_load_sequence')
+                    if seq is not None:
+                        seq_map[int(seq)] = p
+                    title = p.setting.get('Title')
+                    grp = p.setting.get('group', OTHER_GROUP_NAME)
+                    title_map.setdefault((title, grp), []).append(p)
+                else:
+                    # fallback: try to use widget.objectName as title hint
+                    name = getattr(p, 'objectName', None)
+                    if name:
+                        title_map.setdefault((name, None), []).append(p)
+            except Exception:
+                continue
 
-                return values
-        except Exception:
-            pass
+        for tab in (self.setting.get('SearchTabs') or []):
+            try:
+                if isinstance(tab, dict):
+                    # Prefer matching by load sequence
+                    seq = tab.get('_load_sequence')
+                    if seq is not None and int(seq) in seq_map and seq_map[int(seq)] not in used:
+                        w = seq_map[int(seq)]
+                        result.append(w)
+                        used.add(w)
+                        continue
 
-        # Case 2: owner widget or single-line widgets exposing line_edit
-        try:
-            if hasattr(widget, 'line_edit'):
-                try:
-                    return {'value': widget.line_edit.text()}
-                except Exception:
-                    return {'value': None}
-        except Exception:
-            pass
+                    # Fallback: match by Title+group and pick first unused
+                    title = tab.get('Title')
+                    grp = tab.get('group', OTHER_GROUP_NAME)
+                    candidates = title_map.get((title, grp)) or title_map.get((title, None)) or []
+                    picked = None
+                    for c in candidates:
+                        if c not in used:
+                            picked = c
+                            break
+                    if picked is not None:
+                        result.append(picked)
+                        used.add(picked)
+                        continue
 
-        # Final fallback: find any QLineEdit children and return their texts
-        try:
-            from qgis.PyQt.QtWidgets import QLineEdit
-            edits = widget.findChildren(QLineEdit)
-            if edits:
-                vals = []
-                for e in edits:
-                    try:
-                        vals.append(e.text())
-                    except Exception:
-                        vals.append(None)
-                return vals if len(vals) > 1 else (vals[0] if vals else {})
-        except Exception:
-            pass
+                # Last resort: try to pop next available page preserving order
+                for p in all_pages():
+                    if p not in used:
+                        result.append(p)
+                        used.add(p)
+                        break
+                else:
+                    result.append(None)
+            except Exception:
+                result.append(None)
 
-        return {}
+        return result
 
     def add_current_layer_to_project_variable(self):
         try:
@@ -642,6 +676,26 @@ class SearchDialog(QDialog):
                     if tab_index >= 0:
                         current_tab = current_group_widget.widget(tab_index)
                         current_tab_title = current_group_widget.tabText(tab_index)
+                else:
+                    # our group pages are QWidget containers that hold a child QTabWidget.
+                    # Try to locate the child QTabWidget either from the known mapping
+                    # (`self.tab_groups`) or by finding a QTabWidget inside the page.
+                    try:
+                        child_tabs = None
+                        if self.tab_groups and current_group_name in self.tab_groups:
+                            child_tabs = self.tab_groups.get(current_group_name)
+                        if child_tabs is None and hasattr(current_group_widget, 'findChild'):
+                            try:
+                                child_tabs = current_group_widget.findChild(QTabWidget)
+                            except Exception:
+                                child_tabs = None
+                        if isinstance(child_tabs, QTabWidget):
+                            tab_index = child_tabs.currentIndex()
+                            if tab_index >= 0:
+                                current_tab = child_tabs.widget(tab_index)
+                                current_tab_title = child_tabs.tabText(tab_index)
+                    except Exception:
+                        pass
                         # No longer using per-tab IDs; we'll match by Title+group when
                         # updating project variables.
             else:
@@ -688,19 +742,172 @@ class SearchDialog(QDialog):
                 # 注: タブのUI削除は行わず、プロジェクト変数から削除した後に
                 # reload_uiメソッドによってUIが再構築される
                 
+                # Prefer to match by the widget's underlying setting Title (not
+                # the possibly-localized tab text). Fall back to the visible
+                # tab text when widget.setting is unavailable.
+                resolved_title = None
+                try:
+                    if hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict):
+                        resolved_title = current_tab.setting.get('Title')
+                except Exception:
+                    resolved_title = None
+                if not resolved_title:
+                    resolved_title = current_tab_title
+
+                # If this tab originated from an external geo_search_json file,
+                # allow deleting it directly from that file. Use the annotated
+                # '_source' and '_source_index' that were attached when the
+                # dialog was created in plugin.create_search_dialog.
+                try:
+                    if hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict) and current_tab.setting.get('_source') == 'geo_search_json':
+                        src_idx = current_tab.setting.get('_source_index')
+                        # Ask for confirmation first
+                        try:
+                            q = QMessageBox.question(
+                                self,
+                                self.tr("Delete tab from geo_search_json"),
+                                self.tr("This tab was loaded from the external geo_search_json file.\nDo you want to remove the corresponding entry from that file?"),
+                                QMessageBox.Yes | QMessageBox.No,
+                            )
+                        except Exception:
+                            q = QMessageBox.No
+
+                        if q != QMessageBox.Yes:
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage("User cancelled deletion from geo_search_json", 'GEO-search-plugin', 0)
+                            except Exception:
+                                pass
+                            return
+
+                        # Resolve path from env or project variable (do not create default)
+                        path = None
+                        try:
+                            path = os.environ.get('geo_search_json')
+                        except Exception:
+                            path = None
+                        try:
+                            from qgis.core import QgsProject, QgsExpressionContextUtils
+                            proj = QgsProject.instance()
+                            pv = QgsExpressionContextUtils.projectScope(proj).variable('geo_search_json')
+                            if pv:
+                                path = pv
+                            # resolve relative to project dir if necessary
+                            try:
+                                proj_file = proj.fileName() or ''
+                                proj_dir = os.path.dirname(proj_file) if proj_file else ''
+                            except Exception:
+                                proj_dir = ''
+                            if path and proj_dir and not os.path.isabs(path):
+                                path = os.path.join(proj_dir, path)
+                        except Exception:
+                            pass
+
+                        if not path or not os.path.exists(path):
+                            QMessageBox.warning(self, self.tr("File not found"), self.tr("Could not locate the geo_search_json file to edit."))
+                            return
+
+                        # Read file
+                        try:
+                            with open(path, 'r', encoding='utf-8') as fh:
+                                data = json.load(fh)
+                        except Exception as e:
+                            QMessageBox.warning(self, self.tr("Read error"), self.tr("Failed to read the geo_search_json file: {0}").format(str(e)))
+                            return
+
+                        # Determine target list
+                        if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
+                            target = data['SearchTabs']
+                            container_is_dict = True
+                        elif isinstance(data, list):
+                            target = data
+                            container_is_dict = False
+                        else:
+                            QMessageBox.warning(self, self.tr("Unsupported format"), self.tr("geo_search_json file has unsupported structure; expected {'SearchTabs': [...]} or an array."))
+                            return
+
+                        # Determine index to remove
+                        remove_idx = None
+                        if isinstance(src_idx, int):
+                            if 0 <= src_idx < len(target):
+                                remove_idx = int(src_idx)
+                            else:
+                                remove_idx = None
+                        if remove_idx is None:
+                            # Fallback: find by Title match
+                            title = resolved_title
+                            for i, it in enumerate(target):
+                                try:
+                                    if isinstance(it, dict) and it.get('Title') == title:
+                                        remove_idx = i
+                                        break
+                                except Exception:
+                                    continue
+
+                        if remove_idx is None:
+                            QMessageBox.information(self, self.tr("Not found"), self.tr("Could not find corresponding entry in geo_search_json to remove."))
+                            return
+
+                        # Backup original file
+                        try:
+                            bak_name = f"{os.path.basename(path)}.{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.bak"
+                            bak_path = os.path.join(os.path.dirname(path), bak_name)
+                            shutil.copy2(path, bak_path)
+                        except Exception:
+                            bak_path = None
+
+                        # Remove and write atomically
+                        try:
+                            del target[remove_idx]
+                            # Prepare output object
+                            out = data if container_is_dict else target
+                            # write to temp then replace
+                            dirn = os.path.dirname(path) or '.'
+                            fd, tmp_path = tempfile.mkstemp(prefix='geo_search_', dir=dirn, text=True)
+                            try:
+                                with os.fdopen(fd, 'w', encoding='utf-8') as tmpfh:
+                                    json.dump(out, tmpfh, ensure_ascii=False, indent=2)
+                                os.replace(tmp_path, path)
+                            finally:
+                                try:
+                                    if os.path.exists(tmp_path):
+                                        os.remove(tmp_path)
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            QMessageBox.warning(self, self.tr("Write error"), self.tr("Failed to update geo_search_json file: {0}").format(str(e)))
+                            # Attempt to restore backup if created
+                            try:
+                                if bak_path and os.path.exists(bak_path):
+                                    shutil.copy2(bak_path, path)
+                            except Exception:
+                                pass
+                            return
+
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Removed entry index={remove_idx} from geo_search_json file: {path} (backup={bak_path})", 'GEO-search-plugin', 0)
+                        except Exception:
+                            pass
+
+                        # Reload UI after successful removal
+                        self.reload_ui("after removing tab from geo_search_json")
+                        return
+                except Exception:
+                    # On any unexpected error in geo_search_json removal flow, fall back to project-variable deletion
+                    pass
+
                 # Match by Title and group (IDs removed). Remove entries whose Title matches
-                # the currently selected tab title. This intentionally ignores any 'id'
-                # fields in the stored JSON and prefers Title-based matching for
-                # backward/forward compatibility when group names change.
-                updated_settings = [item for item in parsed if item.get("Title") != current_tab_title]
+                # the resolved title.
+                updated_settings = [item for item in parsed if item.get("Title") != resolved_title]
                 
                 # 変更があったかチェック
                 if len(updated_settings) == len(parsed):
                     try:
                         from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Tab '{current_tab_title}' not found in project variables", "GEO-search-plugin", 1)
+                        QgsMessageLog.logMessage(f"Tab '{resolved_title}' not found in project variables", "GEO-search-plugin", 1)
                     except Exception:
-                        print(f"Tab '{current_tab_title}' not found in project variables")
+                        print(f"Tab '{resolved_title}' not found in project variables")
                     # プロジェクト変数に該当する設定が見つからなかった場合も続行
                     
                 # 更新された設定をJSONに変換（空リストの場合は空文字列に）
@@ -821,9 +1028,21 @@ class SearchDialog(QDialog):
                 
                 # プロジェクト変数IDがある場合は優先的にIDを使用して検索
                 # まずIDで検索
+                # Prefer to match by the widget's underlying setting Title (not
+                # the possibly-localized tab text). Fall back to the visible
+                # tab text when widget.setting is unavailable.
+                resolved_title = None
+                try:
+                    if hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict):
+                        resolved_title = current_tab.setting.get('Title')
+                except Exception:
+                    resolved_title = None
+                if not resolved_title:
+                    resolved_title = current_tab_title
+
                 # Match by Title and group (IDs removed). Prefer exact Title match.
                 for i, config in enumerate(parsed):
-                    if config.get("Title") == current_tab_title:
+                    if config.get("Title") == resolved_title:
                         tab_config = config
                         tab_index_in_config = i
                         break
@@ -866,7 +1085,7 @@ class SearchDialog(QDialog):
             
             # 編集ダイアログを作成
             edit_dialog = QDialog(self)
-            edit_dialog.setWindowTitle(self.tr("Edit Tab Settings: {0}").format(current_tab_title))
+            edit_dialog.setWindowTitle(self.tr("Edit Tab Settings: {0}").format(resolved_title if 'resolved_title' in locals() and resolved_title else current_tab_title))
             edit_dialog.setMinimumSize(700, 600)
             
             layout = QVBoxLayout(edit_dialog)
