@@ -712,54 +712,27 @@ class SearchDialog(QDialog):
                 NO_CONST = 0
                 YES_NO_FLAGS = 0
                 
-            # 選択されているタブの情報を取得
-            current_tab = None
-            current_tab_title = None
-            tab_key = None
-            
-            # 親タブがグループタブかどうかをチェック
-            if self.tab_groups:
-                # グループタブの場合、選択されているグループ内の選択されているタブを取得
-                current_group_index = self.tabWidget.currentIndex()
-                current_group_name = self.tabWidget.tabText(current_group_index)
-                current_group_widget = self.tabWidget.widget(current_group_index)
-                
-                if isinstance(current_group_widget, QTabWidget):
-                    # このグループ内の現在のタブを取得
-                    tab_index = current_group_widget.currentIndex()
-                    if tab_index >= 0:
-                        current_tab = current_group_widget.widget(tab_index)
-                        current_tab_title = current_group_widget.tabText(tab_index)
-                else:
-                    # our group pages are QWidget containers that hold a child QTabWidget.
-                    # Try to locate the child QTabWidget either from the known mapping
-                    # (`self.tab_groups`) or by finding a QTabWidget inside the page.
+            # 選択されているタブの情報を取得（共通ヘルパーを使用）
+            try:
+                current_tab, current_tab_title, current_tab_index, current_group_name, active_tabwidget, src_val, src_idx = self._get_current_tab_info()
+            except Exception:
+                current_tab = None
+                current_tab_title = None
+                current_group_name = None
+                src_val = None
+                src_idx = None
+
+            # Log provenance when available to help debugging
+            try:
+                if src_val is not None or src_idx is not None:
                     try:
-                        child_tabs = None
-                        if self.tab_groups and current_group_name in self.tab_groups:
-                            child_tabs = self.tab_groups.get(current_group_name)
-                        if child_tabs is None and hasattr(current_group_widget, 'findChild'):
-                            try:
-                                child_tabs = current_group_widget.findChild(QTabWidget)
-                            except Exception:
-                                child_tabs = None
-                        if isinstance(child_tabs, QTabWidget):
-                            tab_index = child_tabs.currentIndex()
-                            if tab_index >= 0:
-                                current_tab = child_tabs.widget(tab_index)
-                                current_tab_title = child_tabs.tabText(tab_index)
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"_get_current_tab_info provenance: src_val={repr(src_val)} src_idx={repr(src_idx)} title={repr(current_tab_title)} group={repr(current_group_name)}", "GEO-search-plugin", 0)
                     except Exception:
-                        pass
-                        # No longer using per-tab IDs; we'll match by Title+group when
-                        # updating project variables.
-            else:
-                # 通常のタブの場合、選択されているタブを取得
-                tab_index = self.tabWidget.currentIndex()
-                if tab_index >= 0:
-                    current_tab = self.tabWidget.widget(tab_index)
-                    current_tab_title = self.tabWidget.tabText(tab_index)
-                    # No per-tab ID lookup. Use Title-based matching when editing/removing.
-                    
+                        print(f"_get_current_tab_info provenance: src_val={repr(src_val)} src_idx={repr(src_idx)} title={repr(current_tab_title)} group={repr(current_group_name)}")
+            except Exception:
+                pass
+
             # タブが選択されていなければ終了
             if current_tab is None or current_tab_title is None:
                 try:
@@ -1240,55 +1213,28 @@ class SearchDialog(QDialog):
             except Exception:
                 print("edit_project_variable invoked")
             
-            # 現在選択されているタブの情報を取得
-            current_tab = None
-            current_tab_title = None
-            current_tab_index = -1
-            tab_key = None
-            
-            # 親タブがグループタブかどうかをチェック
-            if self.tab_groups:
-                # グループタブの場合、選択されているグループ内の選択されているタブを取得
-                current_group_index = self.tabWidget.currentIndex()
-                current_group_name = self.tabWidget.tabText(current_group_index)
-                current_group_widget = self.tabWidget.widget(current_group_index)
-                
-                if isinstance(current_group_widget, QTabWidget):
-                    # このグループ内の現在のタブを取得
-                    tab_index = current_group_widget.currentIndex()
-                    if tab_index >= 0:
-                        current_tab = current_group_widget.widget(tab_index)
-                        current_tab_title = current_group_widget.tabText(tab_index)
-                        # No per-tab mapping; matching will be done by Title+group.
-                else:
-                    # our group pages are QWidget containers that hold a child QTabWidget.
-                    # Try to locate the child QTabWidget either from the known mapping
-                    # (`self.tab_groups`) or by finding a QTabWidget inside the page.
+            # 現在選択されているタブの情報を取得（共通ヘルパーを使用）
+            try:
+                current_tab, current_tab_title, current_tab_index, current_group_name, active_tabwidget, src_val, src_idx = self._get_current_tab_info()
+            except Exception:
+                current_tab = None
+                current_tab_title = None
+                current_tab_index = -1
+                current_group_name = None
+                src_val = None
+                src_idx = None
+
+            # Log provenance when available to help debugging (edit flow)
+            try:
+                if src_val is not None or src_idx is not None:
                     try:
-                        child_tabs = None
-                        if self.tab_groups and current_group_name in self.tab_groups:
-                            child_tabs = self.tab_groups.get(current_group_name)
-                        if child_tabs is None and hasattr(current_group_widget, 'findChild'):
-                            try:
-                                child_tabs = current_group_widget.findChild(QTabWidget)
-                            except Exception:
-                                child_tabs = None
-                        if isinstance(child_tabs, QTabWidget):
-                            tab_index = child_tabs.currentIndex()
-                            if tab_index >= 0:
-                                current_tab = child_tabs.widget(tab_index)
-                                current_tab_title = child_tabs.tabText(tab_index)
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"_get_current_tab_info provenance (edit): src_val={repr(src_val)} src_idx={repr(src_idx)} title={repr(current_tab_title)} group={repr(current_group_name)}", "GEO-search-plugin", 0)
                     except Exception:
-                        pass
-            else:
-                # 通常のタブの場合、選択されているタブを取得
-                tab_index = self.tabWidget.currentIndex()
-                if tab_index >= 0:
-                    current_tab = self.tabWidget.widget(tab_index)
-                    current_tab_title = self.tabWidget.tabText(tab_index)
-                    current_tab_index = tab_index
-                    # No per-tab mapping; matching will be done by Title+group.
-            
+                        print(f"_get_current_tab_info provenance (edit): src_val={repr(src_val)} src_idx={repr(src_idx)} title={current_tab_title} group={current_group_name}")
+            except Exception:
+                pass
+
             # タブが選択されていなければ終了
             if current_tab is None or current_tab_title is None:
                 try:
@@ -1322,9 +1268,9 @@ class SearchDialog(QDialog):
                 # 配列でなければ配列に変換
                 if not isinstance(parsed, list):
                     parsed = [parsed]
-                    
+
                 all_configs = parsed
-                
+
                 # プロジェクト変数IDがある場合は優先的にIDを使用して検索
                 # まずIDで検索
                 # Prefer to match by the widget's underlying setting Title (not
@@ -1345,7 +1291,7 @@ class SearchDialog(QDialog):
                         tab_config = config
                         tab_index_in_config = i
                         break
-                
+
                 # 設定が見つからなければ、現在のタブに基づいて新しい設定を作成
                 if tab_config is None:
                     # Create a default tab_config based on current tab title.
@@ -1381,6 +1327,16 @@ class SearchDialog(QDialog):
                     QgsMessageLog.logMessage(f"Error parsing project variable: {e}", "GEO-search-plugin", 1)
                 except Exception:
                     print(f"Error parsing project variable: {e}")
+
+            # Ensure provenance info from UI helper is reflected in the tab_config
+            try:
+                if 'tab_config' in locals() and tab_config is not None:
+                    if src_val is not None:
+                        tab_config['_source'] = src_val
+                    if src_idx is not None:
+                        tab_config['_source_index'] = src_idx
+            except Exception:
+                pass
             
             # 編集ダイアログを作成
             edit_dialog = QDialog(self)
@@ -1930,6 +1886,131 @@ class SearchDialog(QDialog):
                 QgsMessageLog.logMessage(f"edit_project_variable error: {e}", "GEO-search-plugin", 1)
             except Exception:
                 print(f"edit_project_variable error: {e}")
+
+    def _get_current_tab_info(self):
+        """現在選択されているタブ情報を共通的に取得するヘルパー。
+
+        戻り値: (current_tab, current_tab_title, current_tab_index, current_group_name, active_tabwidget, src_val, src_idx)
+        - current_tab: QWidget (選択されたタブのウィジェット) または None
+        - current_tab_title: タブの表示タイトル (str) または None
+        - current_tab_index: 親のタブインデックス (int) または -1
+        - current_group_name: 親グループ名 (str) または None
+        - active_tabwidget: current_tab を含む QTabWidget (メインか子) または None
+        - src_val: 推定されたソース文字列（例: 'geo_search_json' / 'setting.json' / 'project'）または None
+        - src_idx: そのソース内でのインデックス（設定から取得できれば int、無ければ None）
+        """
+        current_tab = None
+        current_tab_title = None
+        current_tab_index = -1
+        current_group_name = None
+        active_tabwidget = None
+        src_val = None
+        src_idx = None
+
+        try:
+            # グループタブが存在するか
+            if getattr(self, 'tab_groups', None):
+                current_group_index = getattr(self.tabWidget, 'currentIndex', lambda: -1)()
+                try:
+                    current_group_name = self.tabWidget.tabText(current_group_index)
+                except Exception:
+                    current_group_name = None
+                try:
+                    current_group_widget = self.tabWidget.widget(current_group_index)
+                except Exception:
+                    current_group_widget = None
+
+                if isinstance(current_group_widget, QTabWidget):
+                    tab_index = current_group_widget.currentIndex()
+                    if tab_index >= 0:
+                        current_tab = current_group_widget.widget(tab_index)
+                        current_tab_title = current_group_widget.tabText(tab_index)
+                        current_tab_index = tab_index
+                        active_tabwidget = current_group_widget
+                else:
+                    # グループページが QWidget コンテナで子 QTabWidget を含む場合のフォールバック
+                    child_tabs = None
+                    try:
+                        if current_group_name and self.tab_groups and current_group_name in self.tab_groups:
+                            child_tabs = self.tab_groups.get(current_group_name)
+                    except Exception:
+                        child_tabs = None
+
+                    if child_tabs is None and hasattr(current_group_widget, 'findChild'):
+                        try:
+                            child_tabs = current_group_widget.findChild(QTabWidget)
+                        except Exception:
+                            child_tabs = None
+
+                    if isinstance(child_tabs, QTabWidget):
+                        tab_index = child_tabs.currentIndex()
+                        if tab_index >= 0:
+                            current_tab = child_tabs.widget(tab_index)
+                            current_tab_title = child_tabs.tabText(tab_index)
+                            current_tab_index = tab_index
+                            active_tabwidget = child_tabs
+            else:
+                # 通常のタブ (グループなし)
+                tab_index = self.tabWidget.currentIndex()
+                if tab_index >= 0:
+                    current_tab = self.tabWidget.widget(tab_index)
+                    current_tab_title = self.tabWidget.tabText(tab_index)
+                    current_tab_index = tab_index
+                    active_tabwidget = self.tabWidget
+
+            # Try to obtain explicit provenance from widget.setting if present
+            try:
+                if current_tab is not None and hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict):
+                    src_val = current_tab.setting.get('_source')
+                    src_idx = current_tab.setting.get('_source_index')
+            except Exception:
+                src_val = None
+                src_idx = None
+
+            # If no explicit provenance, attempt best-effort inference from QLabel children
+            if not src_val and current_tab is not None and hasattr(current_tab, 'findChildren'):
+                try:
+                    from qgis.PyQt.QtWidgets import QLabel
+                    import re
+                    for lbl in current_tab.findChildren(QLabel):
+                        try:
+                            txt = (lbl.text() or '').strip()
+                            if not txt:
+                                continue
+                            m = re.search(r"\[([^\]]+)\]", txt)
+                            if m:
+                                token = m.group(1)
+                                if token and self._normalize_source(token):
+                                    src_val = token
+                                    break
+                            low = txt.lower()
+                            if 'geo' in low and 'search' in low:
+                                src_val = txt
+                                break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
+            # Normalize provenance token if present
+            try:
+                if src_val:
+                    src_val = self._normalize_source(src_val)
+            except Exception:
+                # leave as-is when normalization fails
+                pass
+
+        except Exception:
+            # 何か失敗しても呼び出し側でログを出せるよう None/デフォルトを返す
+            current_tab = None
+            current_tab_title = None
+            current_tab_index = -1
+            current_group_name = None
+            active_tabwidget = None
+            src_val = None
+            src_idx = None
+
+        return current_tab, current_tab_title, current_tab_index, current_group_name, active_tabwidget, src_val, src_idx
     
     def get_monospace_font(self):
         """等幅フォントを取得"""
