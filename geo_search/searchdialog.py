@@ -2119,13 +2119,13 @@ class SearchDialog(QDialog):
             # return None so callers must handle the absence of a selection.
             return None
 
-    def _write_to_setting_json(self, new_item_or_list, replace=False):
+    def _write_to_setting_json(self, new_item_or_list):
         """Write new_item_or_list into plugin's `setting.json`.
 
-        By default the function appends incoming items into existing
-        `SearchTabs`. When `replace=True` the provided list will replace the
-        existing `SearchTabs` (useful for full-list updates coming from the
-        edit dialog).
+        The function performs per-item update: for each incoming item try
+        to match and replace an existing entry by `_source`/`_source_index`
+        or `Title`. If no match is found, the item is appended. This avoids
+        replacing unrelated top-level keys in the file.
         """
         try:
             plugin_dir = os.path.dirname(__file__)
@@ -2157,37 +2157,64 @@ class SearchDialog(QDialog):
             else:
                 incoming = [new_item_or_list]
 
-            if replace:
-                # Preserve existing top-level keys where possible.
-                # If the existing file is a dict, replace only the 'SearchTabs'
-                # value and keep other keys intact. If it's a list, there's
-                # no other keys to preserve so replace the list entirely.
-                if isinstance(data, dict):
-                    data['SearchTabs'] = incoming
-                    out = data
-                elif isinstance(data, list):
-                    # existing file is a list - replace it with incoming list
-                    out = incoming
-                else:
-                    out = {'SearchTabs': incoming}
+            # Always perform per-item update/append semantics: try to update
+            # each incoming item by _source/_source_index or Title, appending
+            # if not found. This avoids full-file overwrites that remove
+            # unrelated top-level keys.
+            if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
+                target = data['SearchTabs']
+                container_is_dict = True
+            elif isinstance(data, list):
+                target = data
+                container_is_dict = False
             else:
-                if data is None:
-                    out = {'SearchTabs': incoming}
-                else:
-                    if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
-                        # Append incoming items to existing SearchTabs
-                        data['SearchTabs'].extend(incoming)
-                        out = data
-                    elif isinstance(data, list):
-                        data.extend(incoming)
-                        out = data
+                target = []
+                container_is_dict = True
+
+            update_performed = False
+            try:
+                for item in incoming:
+                    idx = None
+                    try:
+                        if isinstance(item, dict):
+                            src = item.get('_source')
+                            src_idx = item.get('_source_index')
+                            if self._normalize_source(src) == 'setting.json' and isinstance(src_idx, int):
+                                if 0 <= int(src_idx) < len(target):
+                                    idx = int(src_idx)
+                    except Exception:
+                        idx = None
+
+                    if idx is None:
+                        title = item.get('Title') if isinstance(item, dict) else None
+                        if title:
+                            for i, it in enumerate(target):
+                                try:
+                                    if isinstance(it, dict) and it.get('Title') == title:
+                                        idx = i
+                                        break
+                                except Exception:
+                                    continue
+
+                    if idx is not None:
+                        try:
+                            target[idx] = item
+                            update_performed = True
+                        except Exception:
+                            continue
                     else:
-                        out = {'SearchTabs': []}
-                        if isinstance(data, list):
-                            out['SearchTabs'].extend(data)
-                        else:
-                            out['SearchTabs'].append(data)
-                        out['SearchTabs'].extend(incoming)
+                        try:
+                            target.append(item)
+                            update_performed = True
+                        except Exception:
+                            continue
+            except Exception:
+                update_performed = False
+
+            if update_performed:
+                out = data if container_is_dict else target
+            else:
+                out = {'SearchTabs': incoming}
 
             with open(path, 'w', encoding='utf-8') as fh:
                 json.dump(out, fh, ensure_ascii=False, indent=2)
@@ -2221,148 +2248,147 @@ class SearchDialog(QDialog):
             except Exception:
                 pass
             return False
+    def _update_entry_in_setting_json(self, tab_config, all_configs, tab_index):
+        """Update only the matching entry in plugin `setting.json`.
 
-        def _update_entry_in_setting_json(self, tab_config, all_configs, tab_index):
-            """Update only the matching entry in plugin `setting.json`.
+        Matching priority:
+        1. If tab_config._source == 'setting.json' and _source_index is int -> use that index
+        2. Else: match by Title (first match)
+        3. If not found: append the entry
 
-            Matching priority:
-            1. If tab_config._source == 'setting.json' and _source_index is int -> use that index
-            2. Else: match by Title (first match)
-            3. If not found: append the entry
+        Returns True on success.
+        """
+        try:
+            plugin_dir = os.path.dirname(__file__)
+            path = os.path.join(plugin_dir, 'setting.json')
+            if not os.path.exists(path):
+                # create fresh file with SearchTabs
+                out = {'SearchTabs': all_configs}
+                with open(path, 'w', encoding='utf-8') as fh:
+                    json.dump(out, fh, ensure_ascii=False, indent=2)
+                return True
 
-            Returns True on success.
-            """
-            try:
-                plugin_dir = os.path.dirname(__file__)
-                path = os.path.join(plugin_dir, 'setting.json')
-                if not os.path.exists(path):
-                    # create fresh file with SearchTabs
-                    out = {'SearchTabs': all_configs}
-                    with open(path, 'w', encoding='utf-8') as fh:
-                        json.dump(out, fh, ensure_ascii=False, indent=2)
-                    return True
-
-                with open(path, 'r', encoding='utf-8') as fh:
+            with open(path, 'r', encoding='utf-8') as fh:
+                try:
+                    data = json.load(fh)
+                except Exception:
+                    # fallback: try to parse as array-wrapped text
+                    fh.seek(0)
+                    text = fh.read()
                     try:
-                        data = json.load(fh)
+                        data = json.loads(f'[{text}]')
                     except Exception:
-                        # fallback: try to parse as array-wrapped text
-                        fh.seek(0)
-                        text = fh.read()
-                        try:
-                            data = json.loads(f'[{text}]')
-                        except Exception:
-                            data = None
+                        data = None
 
-                # Determine target list
-                if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
-                    target = data['SearchTabs']
-                    container_is_dict = True
-                elif isinstance(data, list):
-                    target = data
-                    container_is_dict = False
-                else:
-                    # unknown structure: replace with SearchTabs container preserving nothing
-                    target = []
-                    container_is_dict = True
+            # Determine target list
+            if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
+                target = data['SearchTabs']
+                container_is_dict = True
+            elif isinstance(data, list):
+                target = data
+                container_is_dict = False
+            else:
+                # unknown structure: replace with SearchTabs container preserving nothing
+                target = []
+                container_is_dict = True
 
-                # Determine update index
+            # Determine update index
+            update_idx = None
+            try:
+                if isinstance(tab_config, dict):
+                    src = tab_config.get('_source')
+                    src_idx = tab_config.get('_source_index')
+                    if self._normalize_source(src) == 'setting.json' and isinstance(src_idx, int):
+                        if 0 <= int(src_idx) < len(target):
+                            update_idx = int(src_idx)
+            except Exception:
                 update_idx = None
+
+            if update_idx is None:
+                # match by Title
+                title = None
                 try:
                     if isinstance(tab_config, dict):
-                        src = tab_config.get('_source')
-                        src_idx = tab_config.get('_source_index')
-                        if self._normalize_source(src) == 'setting.json' and isinstance(src_idx, int):
-                            if 0 <= int(src_idx) < len(target):
-                                update_idx = int(src_idx)
+                        title = tab_config.get('Title')
                 except Exception:
-                    update_idx = None
-
-                if update_idx is None:
-                    # match by Title
                     title = None
-                    try:
-                        if isinstance(tab_config, dict):
-                            title = tab_config.get('Title')
-                    except Exception:
-                        title = None
-                    if not title and tab_index is not None and tab_index >= 0 and tab_index < len(all_configs):
-                        title = all_configs[tab_index].get('Title') if isinstance(all_configs[tab_index], dict) else None
+                if not title and tab_index is not None and tab_index >= 0 and tab_index < len(all_configs):
+                    title = all_configs[tab_index].get('Title') if isinstance(all_configs[tab_index], dict) else None
 
-                    if title:
-                        for i, it in enumerate(target):
-                            try:
-                                if isinstance(it, dict) and it.get('Title') == title:
-                                    update_idx = i
-                                    break
-                            except Exception:
-                                continue
-
-                # Backup
-                bak_path = None
-                try:
-                    bak_name = f"{os.path.basename(path)}.{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.bak"
-                    bak_path = os.path.join(os.path.dirname(path), bak_name)
-                    shutil.copy2(path, bak_path)
-                except Exception:
-                    bak_path = None
-
-                # Perform update or append
-                try:
-                    if update_idx is not None and 0 <= update_idx < len(target):
-                        target[update_idx] = tab_config
-                    else:
-                        # append
-                        target.append(tab_config)
-
-                    out = data if container_is_dict else target
-
-                    # atomic write
-                    dirn = os.path.dirname(path) or '.'
-                    fd, tmp_path = tempfile.mkstemp(prefix='geo_search_set_', dir=dirn, text=True)
-                    try:
-                        with os.fdopen(fd, 'w', encoding='utf-8') as tmpfh:
-                            json.dump(out, tmpfh, ensure_ascii=False, indent=2)
-                        os.replace(tmp_path, path)
-                    finally:
+                if title:
+                    for i, it in enumerate(target):
                         try:
-                            if os.path.exists(tmp_path):
-                                os.remove(tmp_path)
+                            if isinstance(it, dict) and it.get('Title') == title:
+                                update_idx = i
+                                break
                         except Exception:
-                            pass
+                            continue
 
-                except Exception as e:
-                    # restore backup on failure
+            # Backup
+            bak_path = None
+            try:
+                bak_name = f"{os.path.basename(path)}.{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.bak"
+                bak_path = os.path.join(os.path.dirname(path), bak_name)
+                shutil.copy2(path, bak_path)
+            except Exception:
+                bak_path = None
+
+            # Perform update or append
+            try:
+                if update_idx is not None and 0 <= update_idx < len(target):
+                    target[update_idx] = tab_config
+                else:
+                    # append
+                    target.append(tab_config)
+
+                out = data if container_is_dict else target
+
+                # atomic write
+                dirn = os.path.dirname(path) or '.'
+                fd, tmp_path = tempfile.mkstemp(prefix='geo_search_set_', dir=dirn, text=True)
+                try:
+                    with os.fdopen(fd, 'w', encoding='utf-8') as tmpfh:
+                        json.dump(out, tmpfh, ensure_ascii=False, indent=2)
+                    os.replace(tmp_path, path)
+                finally:
                     try:
-                        if bak_path and os.path.exists(bak_path):
-                            shutil.copy2(bak_path, path)
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
                     except Exception:
                         pass
-                    raise
 
-                try:
-                    from qgis.core import QgsMessageLog
-                    QgsMessageLog.logMessage(f"Updated setting.json at {path}; index={update_idx} backup={bak_path}", 'GEO-search-plugin', 0)
-                except Exception:
-                    print(f"Updated setting.json at {path}; index={update_idx} backup={bak_path}")
-
-                return True
             except Exception as e:
+                # restore backup on failure
                 try:
-                    from qgis.core import QgsMessageLog
-                    QgsMessageLog.logMessage(f"_update_entry_in_setting_json error: {e}", 'GEO-search-plugin', 1)
+                    if bak_path and os.path.exists(bak_path):
+                        shutil.copy2(bak_path, path)
                 except Exception:
-                    print(f"_update_entry_in_setting_json error: {e}")
-                return False
+                    pass
+                raise
+
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"Updated setting.json at {path}; index={update_idx} backup={bak_path}", 'GEO-search-plugin', 0)
+            except Exception:
+                print(f"Updated setting.json at {path}; index={update_idx} backup={bak_path}")
+
+            return True
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_update_entry_in_setting_json error: {e}", 'GEO-search-plugin', 1)
+            except Exception:
+                print(f"_update_entry_in_setting_json error: {e}")
+            return False
 
 
-    def _write_to_geo_search_json(self, new_item_or_list, replace=False):
+    def _write_to_geo_search_json(self, new_item_or_list):
         """Write new_item_or_list into external file specified by env/project variable 'geo_search_json'.
 
-        By default this appends incoming items into the target file's
-        `SearchTabs`. When `replace=True`, the provided list replaces the
-        existing `SearchTabs` (used for full-list updates coming from edit
-        operations).
+        The function performs per-item update: for each incoming item try
+        to match and replace an existing entry by `_source`/`_source_index`
+        or `Title`. If no match is found, the item is appended. This avoids
+        replacing unrelated top-level keys in the file.
         """
         try:
             # resolve path from env or project variable
@@ -2467,91 +2493,64 @@ class SearchDialog(QDialog):
             except Exception:
                 print(f"_write_to_geo_search_json: incoming count={len(incoming)}")
 
-            if replace:
-                # Instead of replacing the whole file, update only the
-                # corresponding SearchTabs entry when possible. We'll try
-                # to find the target by _source/_source_index or Title.
-                # Load existing target list reference
-                if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
-                    target = data['SearchTabs']
-                    container_is_dict = True
-                elif isinstance(data, list):
-                    target = data
-                    container_is_dict = False
-                else:
-                    target = []
-                    container_is_dict = True
-
-                # Determine update index using heuristics based on incoming
-                # content. When incoming appears to be a full list, prefer
-                # to update individual item(s) by matching Title or using
-                # _source_index if present in incoming items.
-                update_performed = False
-                try:
-                    # If incoming is a list, try to update per-item
-                    for item in incoming:
-                        idx = None
-                        try:
-                            if isinstance(item, dict):
-                                src = item.get('_source')
-                                src_idx = item.get('_source_index')
-                                if self._normalize_source(src) == 'geo_search_json' and isinstance(src_idx, int):
-                                    if 0 <= int(src_idx) < len(target):
-                                        idx = int(src_idx)
-                        except Exception:
-                            idx = None
-
-                        if idx is None:
-                            # match by Title
-                            title = item.get('Title') if isinstance(item, dict) else None
-                            if title:
-                                for i, it in enumerate(target):
-                                    try:
-                                        if isinstance(it, dict) and it.get('Title') == title:
-                                            idx = i
-                                            break
-                                    except Exception:
-                                        continue
-
-                        if idx is not None:
-                            # replace single entry
-                            try:
-                                target[idx] = item
-                                update_performed = True
-                            except Exception:
-                                continue
-                        else:
-                            # not found -> append
-                            try:
-                                target.append(item)
-                                update_performed = True
-                            except Exception:
-                                continue
-                except Exception:
-                    update_performed = False
-
-                if update_performed:
-                    out = data if container_is_dict else target
-                else:
-                    # fallback: write full SearchTabs container
-                    out = {'SearchTabs': incoming}
+            # Perform per-item update/append semantics: try to update each
+            # incoming item by _source/_source_index or Title, appending if
+            # not found. If no per-item update could be performed, fall
+            # back to writing a fresh SearchTabs container.
+            if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
+                target = data['SearchTabs']
+                container_is_dict = True
+            elif isinstance(data, list):
+                target = data
+                container_is_dict = False
             else:
-                if data is None:
-                    out = {'SearchTabs': incoming}
-                else:
-                    if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
-                        data['SearchTabs'].extend(incoming)
-                        out = data
-                    elif isinstance(data, list):
-                        data.extend(incoming)
-                        out = data
+                target = []
+                container_is_dict = True
+
+            update_performed = False
+            try:
+                for item in incoming:
+                    idx = None
+                    try:
+                        if isinstance(item, dict):
+                            src = item.get('_source')
+                            src_idx = item.get('_source_index')
+                            if self._normalize_source(src) == 'geo_search_json' and isinstance(src_idx, int):
+                                if 0 <= int(src_idx) < len(target):
+                                    idx = int(src_idx)
+                    except Exception:
+                        idx = None
+
+                    if idx is None:
+                        title = item.get('Title') if isinstance(item, dict) else None
+                        if title:
+                            for i, it in enumerate(target):
+                                try:
+                                    if isinstance(it, dict) and it.get('Title') == title:
+                                        idx = i
+                                        break
+                                except Exception:
+                                    continue
+
+                    if idx is not None:
+                        try:
+                            target[idx] = item
+                            update_performed = True
+                        except Exception:
+                            continue
                     else:
-                        out = {'SearchTabs': []}
-                        if isinstance(data, list):
-                            out['SearchTabs'].extend(data)
-                        else:
-                            out['SearchTabs'].append(data)
-                        out['SearchTabs'].extend(incoming)
+                        try:
+                            target.append(item)
+                            update_performed = True
+                        except Exception:
+                            continue
+            except Exception:
+                update_performed = False
+
+            if update_performed:
+                out = data if container_is_dict else target
+            else:
+                out = {'SearchTabs': incoming}
 
             with open(path, 'w', encoding='utf-8') as fh:
                 json.dump(out, fh, ensure_ascii=False, indent=2)
@@ -3214,10 +3213,10 @@ class SearchDialog(QDialog):
                         try:
                             ok = self._update_entry_in_setting_json(tab_config, all_configs, tab_index)
                             if not ok:
-                                # Fallback to full replace if targeted update failed
-                                self._write_to_setting_json(all_configs, replace=True)
+                                # Fallback to writing the full list (per-item logic will handle updates)
+                                self._write_to_setting_json(all_configs)
                         except Exception:
-                            self._write_to_setting_json(all_configs, replace=True)
+                            self._write_to_setting_json(all_configs)
                     except Exception as e:
                         print(f"Failed to write to setting.json: {e}")
                 elif save_target == 'geo_search_json':
@@ -3228,12 +3227,11 @@ class SearchDialog(QDialog):
                             # and updating/adding single entries.
                             # If the helper cannot perform the update, fall back
                             # to full replace to preserve previous behavior.
-                            # We'll reuse _write_to_geo_search_json with replace=True
-                            # but it now attempts per-item updates when possible.
-                            self._write_to_geo_search_json(all_configs, replace=True)
+                            # Use _write_to_geo_search_json which performs per-item updates
+                            self._write_to_geo_search_json(all_configs)
                         except Exception:
-                            # fallback: full replace
-                            self._write_to_geo_search_json(all_configs, replace=True)
+                            # fallback: write (function will perform per-item updates or full write)
+                            self._write_to_geo_search_json(all_configs)
                     except Exception as e:
                         print(f"Failed to write to geo_search_json file: {e}")
                 else:
@@ -3276,11 +3274,3 @@ class SearchDialog(QDialog):
                 QMessageBox.warning(dialog, "エラー", f"設定の保存中にエラーが発生しました:\n{str(e)}")
             except Exception:
                 pass
-            
-        except Exception as e:
-            try:
-                from qgis.core import QgsMessageLog
-                QgsMessageLog.logMessage(f"save_tab_config error: {e}", "GEO-search-plugin", 1)
-            except Exception:
-                print(f"save_tab_config error: {e}")
-            QMessageBox.warning(self, "エラー", f"タブ設定の保存中にエラーが発生しました:\n{str(e)}")
