@@ -821,7 +821,55 @@ class SearchDialog(QDialog):
                     # Read
                     try:
                         with open(path, 'r', encoding='utf-8') as fh:
-                            data = json.load(fh)
+                            text = fh.read()
+                        try:
+                            data = json.loads(text)
+                        except Exception as e:
+                            # Try to handle legacy files that contain multiple
+                            # top-level JSON objects (e.g. several objects
+                            # concatenated without an enclosing array). Use a
+                            # streaming decode to collect objects.
+                            try:
+                                decoder = json.JSONDecoder()
+                                objs = []
+                                s = text
+                                pos = 0
+                                L = len(s)
+                                # iterate over successive JSON values
+                                while pos < L:
+                                    # skip whitespace
+                                    while pos < L and s[pos].isspace():
+                                        pos += 1
+                                    if pos >= L:
+                                        break
+                                    obj, end = decoder.raw_decode(s, pos)
+                                    objs.append(obj)
+                                    pos = end
+                                    # skip separators (commas/newlines/whitespace)
+                                    while pos < L and s[pos] in ', \t\r\n ':
+                                        pos += 1
+
+                                if len(objs) == 0:
+                                    raise ValueError("no JSON objects found")
+                                if len(objs) == 1:
+                                    data = objs[0]
+                                else:
+                                    # Merge multiple objects into a list/container
+                                    merged = []
+                                    for o in objs:
+                                        if isinstance(o, dict) and isinstance(o.get(container_key), list):
+                                            merged.extend(o.get(container_key))
+                                        elif isinstance(o, list):
+                                            merged.extend(o)
+                                        elif isinstance(o, dict):
+                                            merged.append(o)
+                                        else:
+                                            # primitive value - include as-is
+                                            merged.append(o)
+                                    data = merged
+                            except Exception:
+                                QMessageBox.warning(self, self.tr("Read error"), self.tr("Failed to read the geo_search_json file: {0}").format(str(e)))
+                                return False
                     except Exception as e:
                         QMessageBox.warning(self, self.tr("Read error"), self.tr("Failed to read the geo_search_json file: {0}").format(str(e)))
                         return False
@@ -950,6 +998,39 @@ class SearchDialog(QDialog):
                         print(f"remove_current_tab: inferred src_val={repr(src_val)} norm={norm_src} src_idx={repr(src_idx)} title={current_tab_title}")
                     except Exception:
                         pass
+
+                # If the inferred source is the plugin's bundled setting.json,
+                # remove from that file directly.
+                if norm_src == 'setting.json':
+                    try:
+                        # Confirm with user
+                        q = QMessageBox.question(
+                            self,
+                            self.tr("Delete tab from plugin setting.json"),
+                            self.tr("This tab was loaded from the plugin's setting.json file.\nDo you want to remove the corresponding entry from that file?"),
+                            YES_NO_FLAGS,
+                        )
+                    except Exception:
+                        q = NO_CONST
+
+                    if q != YES_CONST:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage("User cancelled deletion from plugin setting.json (no project variable present)", 'GEO-search-plugin', 0)
+                        except Exception:
+                            pass
+                        return
+
+                    plugin_dir = os.path.dirname(__file__)
+                    path = os.path.join(plugin_dir, 'setting.json')
+                    if not os.path.exists(path):
+                        QMessageBox.warning(self, self.tr("File not found"), self.tr("Could not locate the plugin setting.json file to edit."))
+                        return
+
+                    ok = _remove_from_json_file(path, title=(current_tab.setting.get('Title') if isinstance(current_tab.setting, dict) else current_tab_title), src_idx=src_idx)
+                    if ok:
+                        self.reload_ui("after removing tab from plugin setting.json (no project variable)")
+                    return
 
                 if norm_src == 'geo_search_json':
                     # Ask confirm
