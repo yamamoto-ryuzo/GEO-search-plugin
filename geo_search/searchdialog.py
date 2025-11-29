@@ -2036,7 +2036,8 @@ class SearchDialog(QDialog):
                 "Plugin setting.json",
             ]
             # default to project, but if geo_search_json is configured, prefer that
-            default_index = 0
+            # items indices: 0=geo_search_json, 1=Project variable, 2=Plugin setting.json
+            default_index = 1  # default to Project variable
             try:
                 import os
                 from qgis.core import QgsProject, QgsExpressionContextUtils
@@ -2046,10 +2047,11 @@ class SearchDialog(QDialog):
                     pv = QgsExpressionContextUtils.projectScope(proj).variable('geo_search_json')
                 except Exception:
                     pv = None
+                # If either env or project variable points to a geo_search_json, prefer the geo_search_json option
                 if env_val or pv:
-                    default_index = 2
+                    default_index = 0
             except Exception:
-                default_index = 0
+                default_index = 1
 
             try:
                 raw = QInputDialog.getItem(self, self.tr("Choose save target"), self.tr("Select where to save new setting:"), items, default_index, False)
