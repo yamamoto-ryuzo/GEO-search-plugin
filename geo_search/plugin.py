@@ -1091,28 +1091,55 @@ class plugin(object):
             env_name = os.environ.get('geo_search_json')
         except Exception:
             env_name = None
+
+        # If env var not set, also support a project-scoped variable 'geo_search_json'
+        # so that plugins can persist the path into the project (created by UI flows).
+        try:
+            if not env_name:
+                try:
+                    from qgis.core import QgsExpressionContextUtils
+                    pv_geo = QgsExpressionContextUtils.projectScope(ProjectInstance).variable('geo_search_json')
+                except Exception:
+                    pv_geo = None
+                if pv_geo:
+                    # prefer project variable when env is not set
+                    env_name = pv_geo
+        except Exception:
+            pass
+
         if env_name:
             try:
+                # resolve candidate path: if absolute use it, otherwise attempt project-dir then plugin-dir
                 if os.path.isabs(env_name):
                     candidate = env_name
                 else:
-                    candidate = os.path.join(os.path.dirname(__file__), env_name)
+                    # try project dir first
+                    try:
+                        proj_file = ProjectInstance.fileName()
+                        proj_dir = os.path.dirname(proj_file) if proj_file else None
+                    except Exception:
+                        proj_dir = None
+                    if proj_dir:
+                        candidate = os.path.join(proj_dir, env_name)
+                    else:
+                        candidate = os.path.join(os.path.dirname(__file__), env_name)
+
                 if os.path.exists(candidate):
                     try:
                         with open(candidate, 'r', encoding='utf-8') as f:
                             input_json_env = f.read()
                         from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Loaded settings file from env geo_search_json: {candidate}", "GEO-search-plugin", 0)
+                        QgsMessageLog.logMessage(f"Loaded settings file from geo_search_json (env/project): {candidate}", "GEO-search-plugin", 0)
                     except Exception as e:
                         try:
                             from qgis.core import QgsMessageLog
-                            QgsMessageLog.logMessage(f"Failed to read env-specified settings file '{candidate}': {e}", "GEO-search-plugin", 2)
+                            QgsMessageLog.logMessage(f"Failed to read geo_search_json-specified settings file '{candidate}': {e}", "GEO-search-plugin", 2)
                         except Exception:
                             pass
                 else:
                     try:
                         from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Env-specified settings file not found: {candidate}", "GEO-search-plugin", 1)
+                        QgsMessageLog.logMessage(f"geo_search_json-specified settings file not found: {candidate}", "GEO-search-plugin", 1)
                     except Exception:
                         pass
             except Exception:
