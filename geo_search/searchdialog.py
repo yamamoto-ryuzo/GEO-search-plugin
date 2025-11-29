@@ -23,7 +23,7 @@ from .constants import OTHER_GROUP_NAME
 
 UI_FILE = "dialog.ui"
 
-from .utils import set_project_variable
+from .utils import set_project_variable, remove_entry_from_json_file
 
 
 class SearchDialog(QDialog):
@@ -817,129 +817,7 @@ class SearchDialog(QDialog):
                         return p
                     return None
 
-                def _remove_from_json_file(path, title=None, src_idx=None, container_key='SearchTabs'):
-                    # Read
-                    try:
-                        with open(path, 'r', encoding='utf-8') as fh:
-                            text = fh.read()
-                        try:
-                            data = json.loads(text)
-                        except Exception as e:
-                            # Try to handle legacy files that contain multiple
-                            # top-level JSON objects (e.g. several objects
-                            # concatenated without an enclosing array). Use a
-                            # streaming decode to collect objects.
-                            try:
-                                decoder = json.JSONDecoder()
-                                objs = []
-                                s = text
-                                pos = 0
-                                L = len(s)
-                                # iterate over successive JSON values
-                                while pos < L:
-                                    # skip whitespace
-                                    while pos < L and s[pos].isspace():
-                                        pos += 1
-                                    if pos >= L:
-                                        break
-                                    obj, end = decoder.raw_decode(s, pos)
-                                    objs.append(obj)
-                                    pos = end
-                                    # skip separators (commas/newlines/whitespace)
-                                    while pos < L and s[pos] in ', \t\r\n ':
-                                        pos += 1
-
-                                if len(objs) == 0:
-                                    raise ValueError("no JSON objects found")
-                                if len(objs) == 1:
-                                    data = objs[0]
-                                else:
-                                    # Merge multiple objects into a list/container
-                                    merged = []
-                                    for o in objs:
-                                        if isinstance(o, dict) and isinstance(o.get(container_key), list):
-                                            merged.extend(o.get(container_key))
-                                        elif isinstance(o, list):
-                                            merged.extend(o)
-                                        elif isinstance(o, dict):
-                                            merged.append(o)
-                                        else:
-                                            # primitive value - include as-is
-                                            merged.append(o)
-                                    data = merged
-                            except Exception:
-                                QMessageBox.warning(self, self.tr("Read error"), self.tr("Failed to read the geo_search_json file: {0}").format(str(e)))
-                                return False
-                    except Exception as e:
-                        QMessageBox.warning(self, self.tr("Read error"), self.tr("Failed to read the geo_search_json file: {0}").format(str(e)))
-                        return False
-
-                    if isinstance(data, dict) and isinstance(data.get(container_key), list):
-                        target = data[container_key]
-                        container_is_dict = True
-                    elif isinstance(data, list):
-                        target = data
-                        container_is_dict = False
-                    else:
-                        QMessageBox.warning(self, self.tr("Unsupported format"), self.tr("geo_search_json file has unsupported structure; expected {'SearchTabs': [...]} or an array."))
-                        return False
-
-                    remove_idx = None
-                    if isinstance(src_idx, int) and 0 <= src_idx < len(target):
-                        remove_idx = int(src_idx)
-
-                    if remove_idx is None and title:
-                        for i, it in enumerate(target):
-                            try:
-                                if isinstance(it, dict) and it.get('Title') == title:
-                                    remove_idx = i
-                                    break
-                            except Exception:
-                                continue
-
-                    if remove_idx is None:
-                        QMessageBox.information(self, self.tr("Not found"), self.tr("Could not find corresponding entry in geo_search_json to remove."))
-                        return False
-
-                    # Backup
-                    try:
-                        bak_name = f"{os.path.basename(path)}.{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.bak"
-                        bak_path = os.path.join(os.path.dirname(path), bak_name)
-                        shutil.copy2(path, bak_path)
-                    except Exception:
-                        bak_path = None
-
-                    # Remove and write atomically
-                    try:
-                        del target[remove_idx]
-                        out = data if container_is_dict else target
-                        dirn = os.path.dirname(path) or '.'
-                        fd, tmp_path = tempfile.mkstemp(prefix='geo_search_', dir=dirn, text=True)
-                        try:
-                            with os.fdopen(fd, 'w', encoding='utf-8') as tmpfh:
-                                json.dump(out, tmpfh, ensure_ascii=False, indent=2)
-                            os.replace(tmp_path, path)
-                        finally:
-                            try:
-                                if os.path.exists(tmp_path):
-                                    os.remove(tmp_path)
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        QMessageBox.warning(self, self.tr("Write error"), self.tr("Failed to update geo_search_json file: {0}").format(str(e)))
-                        try:
-                            if bak_path and os.path.exists(bak_path):
-                                shutil.copy2(bak_path, path)
-                        except Exception:
-                            pass
-                        return False
-
-                    try:
-                        from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Removed entry index={remove_idx} from geo_search_json file: {path} (backup={bak_path})", 'GEO-search-plugin', 0)
-                    except Exception:
-                        pass
-                    return True
+                # removal logic moved to utils.remove_entry_from_json_file
 
                 # Prefer explicit provenance if available. If the widget does
                 # not expose provenance in `setting`, try to infer it from the
@@ -1027,7 +905,7 @@ class SearchDialog(QDialog):
                         QMessageBox.warning(self, self.tr("File not found"), self.tr("Could not locate the plugin setting.json file to edit."))
                         return
 
-                    ok = _remove_from_json_file(path, title=(current_tab.setting.get('Title') if isinstance(current_tab.setting, dict) else current_tab_title), src_idx=src_idx)
+                    ok = remove_entry_from_json_file(path, title=(current_tab.setting.get('Title') if isinstance(current_tab.setting, dict) else current_tab_title), src_idx=src_idx, parent=self)
                     if ok:
                         self.reload_ui("after removing tab from plugin setting.json (no project variable)")
                     return
@@ -1060,7 +938,7 @@ class SearchDialog(QDialog):
                         QMessageBox.warning(self, self.tr("File not found"), self.tr("Could not locate the geo_search_json file to edit."))
                         return
 
-                    ok = _remove_from_json_file(path, title=(current_tab.setting.get('Title') if isinstance(current_tab.setting, dict) else current_tab_title), src_idx=src_idx)
+                    ok = remove_entry_from_json_file(path, title=(current_tab.setting.get('Title') if isinstance(current_tab.setting, dict) else current_tab_title), src_idx=src_idx, parent=self)
                     if ok:
                         self.reload_ui("after removing tab from geo_search_json (no project variable)")
                     return
@@ -1097,7 +975,7 @@ class SearchDialog(QDialog):
                             pass
                         return
 
-                    ok = _remove_from_json_file(path, title=title_to_find, src_idx=None)
+                    ok = remove_entry_from_json_file(path, title=title_to_find, src_idx=None, parent=self)
                     if ok:
                         self.reload_ui("after removing tab from geo_search_json (title-match)")
                     return
