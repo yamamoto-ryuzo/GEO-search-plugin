@@ -2,23 +2,6 @@
 
 [日本語版 / 日本語 (README_JP.md)](./README_JP.md) 
 
-## Table of Contents
-
-- Overview
-- Key features
-  - Search features
-  - Theme / Additive display mode
-- Quick start
-- Core details (see `SEARCH.md`)
-- Per-tab configuration (SearchTab)
-- Configuration sources and roles
-- Qt6 / QGIS compatibility
-- Troubleshooting
-- Search logic (implementation overview)
-- Pan modes (map camera behaviour)
-- Changelog
-
-
 ## Overview
 
 This repository implements the GEO Search System — a modular map-search system for QGIS. The project provides search subsystems (lot-number, owner-name and general attribute searches) and complementary subsystems such as theme/visualization management. Search results are shown as per-layer tabs and the presentation (view fields, paging, and map-theme application) is configurable per tab.
