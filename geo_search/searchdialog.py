@@ -1260,6 +1260,26 @@ class SearchDialog(QDialog):
                         current_tab = current_group_widget.widget(tab_index)
                         current_tab_title = current_group_widget.tabText(tab_index)
                         # No per-tab mapping; matching will be done by Title+group.
+                else:
+                    # our group pages are QWidget containers that hold a child QTabWidget.
+                    # Try to locate the child QTabWidget either from the known mapping
+                    # (`self.tab_groups`) or by finding a QTabWidget inside the page.
+                    try:
+                        child_tabs = None
+                        if self.tab_groups and current_group_name in self.tab_groups:
+                            child_tabs = self.tab_groups.get(current_group_name)
+                        if child_tabs is None and hasattr(current_group_widget, 'findChild'):
+                            try:
+                                child_tabs = current_group_widget.findChild(QTabWidget)
+                            except Exception:
+                                child_tabs = None
+                        if isinstance(child_tabs, QTabWidget):
+                            tab_index = child_tabs.currentIndex()
+                            if tab_index >= 0:
+                                current_tab = child_tabs.widget(tab_index)
+                                current_tab_title = child_tabs.tabText(tab_index)
+                    except Exception:
+                        pass
             else:
                 # 通常のタブの場合、選択されているタブを取得
                 tab_index = self.tabWidget.currentIndex()
