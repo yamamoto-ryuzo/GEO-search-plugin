@@ -503,25 +503,26 @@ class SearchDialog(QDialog):
                 # fallback: set as single-item array string
                 new_value = json.dumps([standard_json], ensure_ascii=False)
 
-            # route write according to user's selection
+            # route write according to user's selection (use small save wrappers and show diagnostics)
+            wrote_ok = False
             try:
                 if save_target == 'project' or save_target is None:
-                    # write back into project variables using centralized helper
                     try:
-                        ok = set_project_variable(project, 'GEO-search-plugin', new_value)
-                        if not ok:
-                            try:
-                                from qgis.core import QgsMessageLog
-                                QgsMessageLog.logMessage("set_project_variable returned False when writing GEO-search-plugin", "GEO-search-plugin", 1)
-                            except Exception:
-                                print("set_project_variable returned False when writing GEO-search-plugin")
-                        else:
+                        ok = self._save_to_project_variable(project, new_value)
+                        if ok:
+                            wrote_ok = True
                             try:
                                 from qgis.core import QgsExpressionContextUtils, QgsMessageLog
                                 read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
                                 QgsMessageLog.logMessage(f"Wrote project variable via helper: {str(read_back)}", "GEO-search-plugin", 0)
                             except Exception:
                                 pass
+                        else:
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage("set_project_variable returned False when writing GEO-search-plugin", "GEO-search-plugin", 1)
+                            except Exception:
+                                print("set_project_variable returned False when writing GEO-search-plugin")
                     except Exception as err:
                         try:
                             from qgis.core import QgsMessageLog
@@ -529,21 +530,15 @@ class SearchDialog(QDialog):
                         except Exception:
                             print(f"Error while persisting via set_project_variable: {err}")
                 elif save_target == 'setting_json':
-                    # write the single tab as an entry into plugin setting.json
-                    try:
-                        self._write_to_setting_json(standard_json)
-                    except Exception as e:
-                        print(f"Failed to write to setting.json: {e}")
+                    wrote_ok = self._save_to_setting_json(standard_json)
                 elif save_target == 'geo_search_json':
-                    try:
-                        self._write_to_geo_search_json(standard_json)
-                    except Exception as e:
-                        print(f"Failed to write to geo_search_json file: {e}")
+                    wrote_ok = self._save_to_geo_search_json(standard_json)
                 else:
-                    # default to project variable via helper
                     try:
-                        ok = set_project_variable(project, 'GEO-search-plugin', new_value)
-                        if not ok:
+                        ok = self._save_to_project_variable(project, new_value)
+                        if ok:
+                            wrote_ok = True
+                        else:
                             try:
                                 from qgis.core import QgsMessageLog
                                 QgsMessageLog.logMessage("set_project_variable returned False when writing GEO-search-plugin (default route)", "GEO-search-plugin", 1)
@@ -561,6 +556,26 @@ class SearchDialog(QDialog):
                     QgsMessageLog.logMessage(f"Error writing settings: {e}", "GEO-search-plugin", 1)
                 except Exception:
                     print(f"Error writing settings: {e}")
+
+            # If write succeeded, reload UI; otherwise show diagnostic to user (already logged by wrappers)
+            if wrote_ok:
+                try:
+                    self.reload_ui("with new layer")
+                except Exception:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage("reload_ui after save failed", "GEO-search-plugin", 2)
+                    except Exception:
+                        print("reload_ui after save failed")
+                # exit early since we already reloaded
+                return
+            else:
+                # inform user that save failed (wrappers/logs provide details)
+                try:
+                    QMessageBox.warning(self, self.tr("Save Failed"), self.tr("Failed to persist the new layer setting. See log for details."))
+                except Exception:
+                    pass
+                return
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog
@@ -568,8 +583,7 @@ class SearchDialog(QDialog):
             except Exception:
                 print(f"add_current_layer_to_project_variable error: {e}")
         
-        # 共通のUIリロードメソッドを呼び出し
-        self.reload_ui("with new layer")
+        # UI reload is handled after successful save; do not reload unconditionally here.
     
     def reload_ui(self, message=""):
         """UIを再読み込みするための共通メソッド"""
@@ -736,7 +750,7 @@ class SearchDialog(QDialog):
                 
                 # プロジェクト変数を更新（統一ヘルパーを使用）
                 try:
-                    ok = set_project_variable(project, 'GEO-search-plugin', new_value)
+                    ok = self._save_to_project_variable(project, new_value)
                     if not ok:
                         try:
                             from qgis.core import QgsMessageLog
@@ -1605,6 +1619,28 @@ class SearchDialog(QDialog):
             print(f"_write_to_setting_json error: {e}")
             QMessageBox.warning(self, self.tr("Error"), self.tr("Failed to write to plugin setting.json: {0}").format(str(e)))
 
+    def _save_to_setting_json(self, item_or_list):
+        """Wrapper that writes to plugin setting.json and returns success boolean."""
+        try:
+            self._write_to_setting_json(item_or_list)
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"save_to_setting_json: wrote item", 'GEO-search-plugin', 0)
+            except Exception:
+                print("save_to_setting_json: wrote item")
+            return True
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"save_to_setting_json error: {e}", 'GEO-search-plugin', 2)
+            except Exception:
+                print(f"save_to_setting_json error: {e}")
+            try:
+                QMessageBox.warning(self, self.tr("Error"), self.tr("Failed to write to plugin setting.json: {0}").format(str(e)))
+            except Exception:
+                pass
+            return False
+
     def _write_to_geo_search_json(self, new_item_or_list):
         """Write new_item_or_list into external file specified by env/project variable 'geo_search_json'."""
         try:
@@ -1738,6 +1774,63 @@ class SearchDialog(QDialog):
         except Exception as e:
             print(f"_write_to_geo_search_json error: {e}")
             QMessageBox.warning(self, self.tr("Error"), self.tr("Failed to write to geo_search_json file: {0}").format(str(e)))
+
+    def _save_to_geo_search_json(self, item_or_list):
+        """Wrapper that writes to geo_search_json (env/project) and returns success boolean."""
+        try:
+            self._write_to_geo_search_json(item_or_list)
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage("save_to_geo_search_json: wrote item", 'GEO-search-plugin', 0)
+            except Exception:
+                print("save_to_geo_search_json: wrote item")
+            return True
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"save_to_geo_search_json error: {e}", 'GEO-search-plugin', 2)
+            except Exception:
+                print(f"save_to_geo_search_json error: {e}")
+            try:
+                QMessageBox.warning(self, self.tr("Error"), self.tr("Failed to write to geo_search_json file: {0}").format(str(e)))
+            except Exception:
+                pass
+            return False
+
+    def _save_to_project_variable(self, project, new_value):
+        """Wrapper that writes the given JSON text into project variable 'GEO-search-plugin'. Returns True on success."""
+        try:
+            ok = set_project_variable(project, 'GEO-search-plugin', new_value)
+            if ok:
+                try:
+                    from qgis.core import QgsExpressionContextUtils, QgsMessageLog
+                    read_back = QgsExpressionContextUtils.projectScope(project).variable('GEO-search-plugin')
+                    QgsMessageLog.logMessage(f"_save_to_project_variable: wrote project variable: {str(read_back)}", 'GEO-search-plugin', 0)
+                except Exception:
+                    pass
+                return True
+            else:
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage("_save_to_project_variable: set_project_variable returned False", 'GEO-search-plugin', 1)
+                except Exception:
+                    print("_save_to_project_variable: set_project_variable returned False")
+                try:
+                    QMessageBox.warning(self, self.tr("Error"), self.tr("Failed to write project variable 'GEO-search-plugin'."))
+                except Exception:
+                    pass
+                return False
+        except Exception as e:
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_save_to_project_variable error: {e}", 'GEO-search-plugin', 2)
+            except Exception:
+                print(f"_save_to_project_variable error: {e}")
+            try:
+                QMessageBox.warning(self, self.tr("Error"), self.tr("Failed to write project variable 'GEO-search-plugin': {0}").format(str(e)))
+            except Exception:
+                pass
+            return False
     
     def edit_view_fields(self, current_fields, layer_name, dialog, callback):
         """ViewFieldsを編集するためのダイアログを表示する"""
@@ -2275,7 +2368,7 @@ class SearchDialog(QDialog):
                 if save_target == 'project':
                     # Use centralized helper to persist project-scoped setting
                     try:
-                        ok = set_project_variable(project, 'GEO-search-plugin', new_value)
+                        ok = self._save_to_project_variable(project, new_value)
                         if not ok:
                             try:
                                 from qgis.core import QgsMessageLog
@@ -2307,7 +2400,7 @@ class SearchDialog(QDialog):
                         print(f"Failed to write to geo_search_json file: {e}")
                 else:
                     try:
-                        ok = set_project_variable(project, 'GEO-search-plugin', new_value)
+                        ok = self._save_to_project_variable(project, new_value)
                         if not ok:
                             try:
                                 from qgis.core import QgsMessageLog
