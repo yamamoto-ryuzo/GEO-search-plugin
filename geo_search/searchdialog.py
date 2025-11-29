@@ -2888,27 +2888,57 @@ class SearchDialog(QDialog):
         """設定を更新し、プロジェクト変数に保存する共通処理"""
         try:
             # 設定の処理を開始
-            # プロジェクト変数を更新
             from qgis.core import QgsProject, QgsExpressionContextUtils
             project = QgsProject.instance()
-            
+
             # 設定を更新または追加
             if tab_index >= 0 and tab_index < len(all_configs):
-                # 既存の設定を更新
                 all_configs[tab_index] = tab_config
             else:
-                # 新しい設定を追加
                 all_configs.append(tab_config)
-                
-            # JSONを文字列に変換
+
+            # JSONを文字列に変換（保存時に使う）
             new_value = json.dumps(all_configs, ensure_ascii=False)
-            
-            # Ask user where to save the updated configuration
+
+            # まず tab_config に provenance 情報があれば自動判定を試す
+            save_target = None
             try:
-                save_target = self.choose_save_target_dialog()
+                src_token = None
+                if isinstance(tab_config, dict):
+                    src_token = tab_config.get('_source')
+                if src_token:
+                    try:
+                        norm = self._normalize_source(src_token)
+                        if norm == 'setting.json':
+                            save_target = 'setting_json'
+                        elif norm == 'geo_search_json':
+                            save_target = 'geo_search_json'
+                        elif norm == 'project':
+                            save_target = 'project'
+                        else:
+                            # 未知トークンは自動選択しない（ユーザーに問う）
+                            save_target = None
+                    except Exception:
+                        save_target = None
             except Exception:
-                # dialog failed to open; treat as no selection
                 save_target = None
+
+            # Log auto-selection decision to help debugging
+            try:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"_update_config_and_save: auto-detected save_target={repr(save_target)} from tab_config._source={repr(tab_config.get('_source') if isinstance(tab_config, dict) else None)}", "GEO-search-plugin", 0)
+            except Exception:
+                try:
+                    print(f"_update_config_and_save: auto-detected save_target={repr(save_target)} from tab_config._source={repr(tab_config.get('_source') if isinstance(tab_config, dict) else None)}")
+                except Exception:
+                    pass
+
+            # If auto-detection failed, ask the user (existing behavior)
+            if save_target is None:
+                try:
+                    save_target = self.choose_save_target_dialog()
+                except Exception:
+                    save_target = None
 
             try:
                 # If user cancelled/no selection, abort save and keep edit dialog open
@@ -2918,15 +2948,14 @@ class SearchDialog(QDialog):
                         QgsMessageLog.logMessage("No save target selected; aborting update_config_and_save", "GEO-search-plugin", 0)
                     except Exception:
                         print("No save target selected; aborting update_config_and_save")
-                    # Inform the user
                     try:
                         QMessageBox.information(dialog, self.tr("Save cancelled"), self.tr("No save target selected. The configuration was not saved."))
                     except Exception:
                         pass
                     return
 
+                # Route to handlers
                 if save_target == 'project':
-                    # Use centralized helper to persist project-scoped setting
                     try:
                         ok = self._save_to_project_variable(project, new_value)
                         if not ok:
@@ -2959,6 +2988,7 @@ class SearchDialog(QDialog):
                     except Exception as e:
                         print(f"Failed to write to geo_search_json file: {e}")
                 else:
+                    # fallback to project variable
                     try:
                         ok = self._save_to_project_variable(project, new_value)
                         if not ok:
@@ -2986,14 +3016,17 @@ class SearchDialog(QDialog):
 
             # UI再読み込み
             self.reload_ui("after editing tab configuration")
-            
+
         except Exception as e:
             try:
                 from qgis.core import QgsMessageLog
                 QgsMessageLog.logMessage(f"_update_config_and_save error: {e}", "GEO-search-plugin", 1)
             except Exception:
                 print(f"_update_config_and_save error: {e}")
-            QMessageBox.warning(dialog, "エラー", f"設定の保存中にエラーが発生しました:\n{str(e)}")
+            try:
+                QMessageBox.warning(dialog, "エラー", f"設定の保存中にエラーが発生しました:\n{str(e)}")
+            except Exception:
+                pass
             
         except Exception as e:
             try:
