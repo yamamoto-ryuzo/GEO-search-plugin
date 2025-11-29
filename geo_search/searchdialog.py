@@ -289,6 +289,34 @@ class SearchDialog(QDialog):
 
         return result
 
+    def _normalize_source(self, src):
+        """Normalize various '_source' token variants into canonical tokens.
+
+        Returns one of: 'geo_search_json', 'project', 'setting.json', or
+        a lowered, underscored fallback string.
+        """
+        try:
+            if src is None:
+                return ''
+            s = str(src).strip().lower()
+            # unify underscores and spaces
+            s = s.replace('_', ' ')
+            # common canonical forms
+            if 'geo' in s and 'search' in s:
+                return 'geo_search_json'
+            if 'setting' in s and 'json' in s:
+                return 'setting.json'
+            if 'project' in s:
+                # collapse any project-related variant to 'project'
+                return 'project'
+            # fallback: return underscored simple token
+            return s.replace(' ', '_')
+        except Exception:
+            try:
+                return str(src)
+            except Exception:
+                return ''
+
     def add_current_layer_to_project_variable(self):
         try:
             try:
@@ -657,6 +685,32 @@ class SearchDialog(QDialog):
                 QgsMessageLog.logMessage("remove_current_tab_from_project_variable invoked", "GEO-search-plugin", 0)
             except Exception:
                 print("remove_current_tab_from_project_variable invoked")
+
+            # Determine safe QMessageBox constants to avoid binding differences
+            YES_CONST = None
+            NO_CONST = None
+            YES_NO_FLAGS = 0
+            try:
+                # Avoid referencing QMessageBox.Yes/No directly in comparisons
+                YES_CONST = getattr(QMessageBox, 'Yes', None)
+                NO_CONST = getattr(QMessageBox, 'No', None)
+                if YES_CONST is None or NO_CONST is None:
+                    sb = getattr(QMessageBox, 'StandardButton', None)
+                    if sb is not None:
+                        YES_CONST = getattr(sb, 'Yes', YES_CONST)
+                        NO_CONST = getattr(sb, 'No', NO_CONST)
+                if YES_CONST is None:
+                    YES_CONST = 0
+                if NO_CONST is None:
+                    NO_CONST = 0
+                try:
+                    YES_NO_FLAGS = YES_CONST | NO_CONST
+                except Exception:
+                    YES_NO_FLAGS = 0
+            except Exception:
+                YES_CONST = 0
+                NO_CONST = 0
+                YES_NO_FLAGS = 0
                 
             # 選択されているタブの情報を取得
             current_tab = None
@@ -722,6 +776,251 @@ class SearchDialog(QDialog):
             existing = proj_scope.variable("GEO-search-plugin")
             
             if existing is None or existing == "":
+                # No project variable set. Try to remove from external
+                # geo_search_json if possible. Resolution strategy:
+                # 1) If widget.setting._source == 'geo_search_json', prefer that.
+                # 2) Otherwise try to resolve geo_search_json path (env/project var),
+                #    allowing the user to locate it if not present.
+                def _resolve_geo_search_path(allow_user_pick=True):
+                    p = None
+                    try:
+                        p = os.environ.get('geo_search_json')
+                    except Exception:
+                        p = None
+                    try:
+                        from qgis.core import QgsProject, QgsExpressionContextUtils
+                        proj = QgsProject.instance()
+                        pv = QgsExpressionContextUtils.projectScope(proj).variable('geo_search_json')
+                        if pv:
+                            p = pv
+                        try:
+                            proj_file = proj.fileName() or ''
+                            proj_dir = os.path.dirname(proj_file) if proj_file else ''
+                        except Exception:
+                            proj_dir = ''
+                        if p and proj_dir and not os.path.isabs(p):
+                            p = os.path.join(proj_dir, p)
+                    except Exception:
+                        pass
+
+                    if (not p or not os.path.exists(p)) and allow_user_pick:
+                        try:
+                            from qgis.PyQt.QtWidgets import QFileDialog
+                            start_dir = os.path.dirname(p) if p else os.getcwd()
+                            sel, _ = QFileDialog.getOpenFileName(self, self.tr("Locate geo_search_json file"), start_dir, self.tr("JSON Files (*.json);;All Files (*)"))
+                        except Exception:
+                            sel = None
+                        if sel:
+                            p = sel
+
+                    if p and os.path.exists(p):
+                        return p
+                    return None
+
+                def _remove_from_json_file(path, title=None, src_idx=None, container_key='SearchTabs'):
+                    # Read
+                    try:
+                        with open(path, 'r', encoding='utf-8') as fh:
+                            data = json.load(fh)
+                    except Exception as e:
+                        QMessageBox.warning(self, self.tr("Read error"), self.tr("Failed to read the geo_search_json file: {0}").format(str(e)))
+                        return False
+
+                    if isinstance(data, dict) and isinstance(data.get(container_key), list):
+                        target = data[container_key]
+                        container_is_dict = True
+                    elif isinstance(data, list):
+                        target = data
+                        container_is_dict = False
+                    else:
+                        QMessageBox.warning(self, self.tr("Unsupported format"), self.tr("geo_search_json file has unsupported structure; expected {'SearchTabs': [...]} or an array."))
+                        return False
+
+                    remove_idx = None
+                    if isinstance(src_idx, int) and 0 <= src_idx < len(target):
+                        remove_idx = int(src_idx)
+
+                    if remove_idx is None and title:
+                        for i, it in enumerate(target):
+                            try:
+                                if isinstance(it, dict) and it.get('Title') == title:
+                                    remove_idx = i
+                                    break
+                            except Exception:
+                                continue
+
+                    if remove_idx is None:
+                        QMessageBox.information(self, self.tr("Not found"), self.tr("Could not find corresponding entry in geo_search_json to remove."))
+                        return False
+
+                    # Backup
+                    try:
+                        bak_name = f"{os.path.basename(path)}.{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.bak"
+                        bak_path = os.path.join(os.path.dirname(path), bak_name)
+                        shutil.copy2(path, bak_path)
+                    except Exception:
+                        bak_path = None
+
+                    # Remove and write atomically
+                    try:
+                        del target[remove_idx]
+                        out = data if container_is_dict else target
+                        dirn = os.path.dirname(path) or '.'
+                        fd, tmp_path = tempfile.mkstemp(prefix='geo_search_', dir=dirn, text=True)
+                        try:
+                            with os.fdopen(fd, 'w', encoding='utf-8') as tmpfh:
+                                json.dump(out, tmpfh, ensure_ascii=False, indent=2)
+                            os.replace(tmp_path, path)
+                        finally:
+                            try:
+                                if os.path.exists(tmp_path):
+                                    os.remove(tmp_path)
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        QMessageBox.warning(self, self.tr("Write error"), self.tr("Failed to update geo_search_json file: {0}").format(str(e)))
+                        try:
+                            if bak_path and os.path.exists(bak_path):
+                                shutil.copy2(bak_path, path)
+                        except Exception:
+                            pass
+                        return False
+
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Removed entry index={remove_idx} from geo_search_json file: {path} (backup={bak_path})", 'GEO-search-plugin', 0)
+                    except Exception:
+                        pass
+                    return True
+
+                # Prefer explicit provenance if available. If the widget does
+                # not expose provenance in `setting`, try to infer it from the
+                # visible UI label (e.g. a QLabel showing "[geo_search_json]").
+                src_val = None
+                src_idx = None
+                try:
+                    if hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict):
+                        src_val = current_tab.setting.get('_source')
+                        src_idx = current_tab.setting.get('_source_index')
+                except Exception:
+                    src_val = None
+                    src_idx = None
+
+                # If no explicit provenance, inspect child QLabel texts for
+                # a marker like "[geo_search_json]" or any text containing
+                # 'geo' and 'search' so we can branch correctly.
+                if not src_val:
+                    try:
+                        from qgis.PyQt.QtWidgets import QLabel
+                        import re
+                        # find any QLabel child containing bracketed token
+                        if hasattr(current_tab, 'findChildren'):
+                            for lbl in current_tab.findChildren(QLabel):
+                                try:
+                                    txt = (lbl.text() or '').strip()
+                                    if not txt:
+                                        continue
+                                    m = re.search(r"\[([^\]]+)\]", txt)
+                                    if m:
+                                        token = m.group(1)
+                                        if token and self._normalize_source(token):
+                                            src_val = token
+                                            break
+                                    # fallback: direct text match
+                                    low = txt.lower()
+                                    if 'geo' in low and 'search' in low:
+                                        src_val = txt
+                                        break
+                                except Exception:
+                                    continue
+                    except Exception:
+                        # Best-effort only; continue without inferred source.
+                        pass
+
+                # Log inferred provenance for debugging
+                try:
+                    norm_src = self._normalize_source(src_val)
+                except Exception:
+                    norm_src = str(src_val)
+                try:
+                    from qgis.core import QgsMessageLog
+                    QgsMessageLog.logMessage(f"remove_current_tab: inferred src_val={repr(src_val)} norm={norm_src} src_idx={repr(src_idx)} title={current_tab_title}", "GEO-search-plugin", 0)
+                except Exception:
+                    try:
+                        print(f"remove_current_tab: inferred src_val={repr(src_val)} norm={norm_src} src_idx={repr(src_idx)} title={current_tab_title}")
+                    except Exception:
+                        pass
+
+                if norm_src == 'geo_search_json':
+                    # Ask confirm
+                    try:
+                        q = QMessageBox.question(
+                            self,
+                            self.tr("Delete tab from geo_search_json"),
+                            self.tr("This tab was loaded from the external geo_search_json file.\nDo you want to remove the corresponding entry from that file?"),
+                            YES_NO_FLAGS,
+                        )
+                    except Exception:
+                        # fallback: ensure q is set to NO to avoid accidental delete
+                        try:
+                            q = NO_CONST
+                        except Exception:
+                            q = 0
+                    if q != YES_CONST:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage("User cancelled deletion from geo_search_json (no project variable present)", 'GEO-search-plugin', 0)
+                        except Exception:
+                            pass
+                        return
+
+                    path = _resolve_geo_search_path(allow_user_pick=True)
+                    if not path:
+                        QMessageBox.warning(self, self.tr("File not found"), self.tr("Could not locate the geo_search_json file to edit."))
+                        return
+
+                    ok = _remove_from_json_file(path, title=(current_tab.setting.get('Title') if isinstance(current_tab.setting, dict) else current_tab_title), src_idx=src_idx)
+                    if ok:
+                        self.reload_ui("after removing tab from geo_search_json (no project variable)")
+                    return
+
+                # Try to resolve geo_search file and look up by Title if provenance not explicit
+                path = _resolve_geo_search_path(allow_user_pick=True)
+                if path:
+                    # attempt title-match removal
+                    title_to_find = None
+                    try:
+                        if hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict):
+                            title_to_find = current_tab.setting.get('Title')
+                    except Exception:
+                        title_to_find = None
+                    if not title_to_find:
+                        title_to_find = current_tab_title
+
+                    # Ask user first
+                    try:
+                        q = QMessageBox.question(
+                            self,
+                            self.tr("Delete tab from geo_search_json"),
+                            self.tr("This tab may be present in the external geo_search_json file.\nDo you want to attempt to remove the matching entry from that file?"),
+                            YES_NO_FLAGS,
+                        )
+                    except Exception:
+                        q = NO_CONST
+
+                    if q != YES_CONST:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage("User declined to search external geo_search_json for matching Title", 'GEO-search-plugin', 0)
+                        except Exception:
+                            pass
+                        return
+
+                    ok = _remove_from_json_file(path, title=title_to_find, src_idx=None)
+                    if ok:
+                        self.reload_ui("after removing tab from geo_search_json (title-match)")
+                    return
+
                 try:
                     from qgis.core import QgsMessageLog
                     QgsMessageLog.logMessage("No project variable exists to remove from", "GEO-search-plugin", 1)
@@ -730,21 +1029,53 @@ class SearchDialog(QDialog):
                 return
                 
             try:
-                # JSONとして解析
-                parsed = json.loads(existing)
-                
-                # 配列でなければ配列に変換
-                if not isinstance(parsed, list):
-                    parsed = [parsed]
-                    
-                # No per-tab project_id property to consider; matching will use Title+group.
-                        
-                # 注: タブのUI削除は行わず、プロジェクト変数から削除した後に
-                # reload_uiメソッドによってUIが再構築される
-                
-                # Prefer to match by the widget's underlying setting Title (not
-                # the possibly-localized tab text). Fall back to the visible
-                # tab text when widget.setting is unavailable.
+                # Try to interpret the project variable. It may be:
+                #  - inline JSON (list/dict)
+                #  - a JSON string
+                #  - a path to an external JSON file (file-backed project variable)
+                parsed = None
+                container_is_file = False
+                project_file_path = None
+
+                # First, try parsing as JSON
+                try:
+                    parsed = json.loads(existing)
+                except Exception:
+                    # Not JSON; maybe it's a file path stored in the variable.
+                    try:
+                        # resolve relative to project dir if necessary
+                        proj = QgsProject.instance()
+                        proj_file = proj.fileName() or ''
+                        proj_dir = os.path.dirname(proj_file) if proj_file else ''
+                        candidate = existing
+                        if isinstance(candidate, str) and proj_dir and not os.path.isabs(candidate):
+                            candidate = os.path.join(proj_dir, candidate)
+                        if isinstance(candidate, str) and os.path.exists(candidate):
+                            # load JSON from file
+                            with open(candidate, 'r', encoding='utf-8') as fh:
+                                parsed = json.load(fh)
+                            container_is_file = True
+                            project_file_path = candidate
+                        else:
+                            parsed = None
+                    except Exception:
+                        parsed = None
+
+                if parsed is None:
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage("Could not parse project variable as JSON nor locate file path.", "GEO-search-plugin", 1)
+                    except Exception:
+                        print("Could not parse project variable as JSON nor locate file path.")
+                    QMessageBox.warning(self, self.tr("Unsupported project variable"), self.tr("Project variable 'GEO-search-plugin' does not contain JSON and is not a valid file path."))
+                    return
+
+                # Normalize parsed into a list when inline
+                if not container_is_file:
+                    if not isinstance(parsed, list):
+                        parsed = [parsed]
+
+                # Prepare resolved title for matching (prefer widget.setting Title)
                 resolved_title = None
                 try:
                     if hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict):
@@ -754,190 +1085,179 @@ class SearchDialog(QDialog):
                 if not resolved_title:
                     resolved_title = current_tab_title
 
-                # If this tab originated from an external geo_search_json file,
-                # allow deleting it directly from that file. Use the annotated
-                # '_source' and '_source_index' that were attached when the
-                # dialog was created in plugin.create_search_dialog.
-                try:
-                    if hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict) and current_tab.setting.get('_source') == 'geo_search_json':
-                        src_idx = current_tab.setting.get('_source_index')
-                        # Ask for confirmation first
-                        try:
-                            q = QMessageBox.question(
-                                self,
-                                self.tr("Delete tab from geo_search_json"),
-                                self.tr("This tab was loaded from the external geo_search_json file.\nDo you want to remove the corresponding entry from that file?"),
-                                QMessageBox.Yes | QMessageBox.No,
-                            )
-                        except Exception:
-                            q = QMessageBox.No
+                # If the project variable itself points to a file (file-backed), allow deleting from that file
+                if container_is_file and project_file_path:
+                    # Ask for confirmation
+                    try:
+                        q = QMessageBox.question(
+                            self,
+                            self.tr("Delete tab from project-backed file"),
+                            self.tr("Project variable points to an external file.\nDo you want to remove the corresponding entry from that file?"),
+                            YES_NO_FLAGS,
+                        )
+                    except Exception:
+                        q = NO_CONST
 
-                        if q != QMessageBox.Yes:
+                    if q != YES_CONST:
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage("User cancelled deletion from project-backed file", 'GEO-search-plugin', 0)
+                        except Exception:
+                            pass
+                        return
+
+                    # Determine list container in file
+                    data = parsed
+                    if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
+                        target = data['SearchTabs']
+                        container_is_dict = True
+                    elif isinstance(data, list):
+                        target = data
+                        container_is_dict = False
+                    else:
+                        QMessageBox.warning(self, self.tr("Unsupported format"), self.tr("Project-backed file has unsupported structure; expected {'SearchTabs': [...]} or an array."))
+                        return
+
+                    # Determine remove index: prefer annotated _source_index when _source refers to project file
+                    remove_idx = None
+                    try:
+                        if hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict):
+                            src = current_tab.setting.get('_source')
+                            src_idx = current_tab.setting.get('_source_index')
+                            if self._normalize_source(src) == 'project' and isinstance(src_idx, int):
+                                if 0 <= src_idx < len(target):
+                                    remove_idx = int(src_idx)
+                    except Exception:
+                        remove_idx = None
+
+                    if remove_idx is None:
+                        # Fallback to Title match
+                        title = resolved_title
+                        for i, it in enumerate(target):
+                            try:
+                                if isinstance(it, dict) and it.get('Title') == title:
+                                    remove_idx = i
+                                    break
+                            except Exception:
+                                continue
+
+                    if remove_idx is None:
+                        QMessageBox.information(self, self.tr("Not found"), self.tr("Could not find corresponding entry in project-backed file to remove."))
+                        return
+
+                    # Backup and atomic remove (same pattern as geo_search_json)
+                    try:
+                        bak_name = f"{os.path.basename(project_file_path)}.{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.bak"
+                        bak_path = os.path.join(os.path.dirname(project_file_path), bak_name)
+                        shutil.copy2(project_file_path, bak_path)
+                    except Exception:
+                        bak_path = None
+
+                    try:
+                        del target[remove_idx]
+                        out = data if container_is_dict else target
+                        dirn = os.path.dirname(project_file_path) or '.'
+                        fd, tmp_path = tempfile.mkstemp(prefix='geo_search_proj_', dir=dirn, text=True)
+                        try:
+                            with os.fdopen(fd, 'w', encoding='utf-8') as tmpfh:
+                                json.dump(out, tmpfh, ensure_ascii=False, indent=2)
+                            os.replace(tmp_path, project_file_path)
+                        finally:
+                            try:
+                                if os.path.exists(tmp_path):
+                                    os.remove(tmp_path)
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        QMessageBox.warning(self, self.tr("Write error"), self.tr("Failed to update project-backed file: {0}").format(str(e)))
+                        try:
+                            if bak_path and os.path.exists(bak_path):
+                                shutil.copy2(bak_path, project_file_path)
+                        except Exception:
+                            pass
+                        return
+
+                    try:
+                        from qgis.core import QgsMessageLog
+                        QgsMessageLog.logMessage(f"Removed entry index={remove_idx} from project-backed file: {project_file_path} (backup={bak_path})", 'GEO-search-plugin', 0)
+                    except Exception:
+                        pass
+
+                    self.reload_ui("after removing tab from project-backed file")
+                    return
+
+                # At this point we have inline parsed list (parsed)
+                # Allow index-based removal if widget.setting annotated the source/index
+                removed = False
+                try:
+                    if hasattr(current_tab, 'setting') and isinstance(current_tab.setting, dict):
+                        src = current_tab.setting.get('_source')
+                        src_idx = current_tab.setting.get('_source_index')
+                        if self._normalize_source(src) == 'project' and isinstance(src_idx, int):
+                            if 0 <= src_idx < len(parsed):
+                                # remove by index
+                                del parsed[int(src_idx)]
+                                removed = True
+                except Exception:
+                    removed = False
+
+                if not removed:
+                    # Fallback: match by Title and group (remove all matching Titles)
+                    updated_settings = [item for item in parsed if not (isinstance(item, dict) and item.get('Title') == resolved_title)]
+                    if len(updated_settings) == len(parsed):
+                        try:
+                            from qgis.core import QgsMessageLog
+                            QgsMessageLog.logMessage(f"Tab '{resolved_title}' not found in project variable (inline)", "GEO-search-plugin", 1)
+                        except Exception:
+                            print(f"Tab '{resolved_title}' not found in project variable (inline)")
+                        # Nothing changed
+                        new_value = json.dumps(parsed, ensure_ascii=False) if parsed else ""
+                    else:
+                        # We removed at least one; write back updated_settings
+                        if len(updated_settings) == 0:
+                            new_value = ""
+                        else:
+                            new_value = json.dumps(updated_settings, ensure_ascii=False)
+                        # Persist
+                        try:
+                            ok = self._save_to_project_variable(project, new_value)
+                            if not ok:
+                                try:
+                                    from qgis.core import QgsMessageLog
+                                    QgsMessageLog.logMessage("set_project_variable returned False when removing tab (inline)", "GEO-search-plugin", 1)
+                                except Exception:
+                                    print("set_project_variable returned False when removing tab (inline)")
+                        except Exception as e:
                             try:
                                 from qgis.core import QgsMessageLog
-                                QgsMessageLog.logMessage("User cancelled deletion from geo_search_json", 'GEO-search-plugin', 0)
+                                QgsMessageLog.logMessage(f"Error updating project variable (inline): {e}", "GEO-search-plugin", 1)
                             except Exception:
-                                pass
-                            return
-
-                        # Resolve path from env or project variable (do not create default)
-                        path = None
-                        try:
-                            path = os.environ.get('geo_search_json')
-                        except Exception:
-                            path = None
-                        try:
-                            from qgis.core import QgsProject, QgsExpressionContextUtils
-                            proj = QgsProject.instance()
-                            pv = QgsExpressionContextUtils.projectScope(proj).variable('geo_search_json')
-                            if pv:
-                                path = pv
-                            # resolve relative to project dir if necessary
-                            try:
-                                proj_file = proj.fileName() or ''
-                                proj_dir = os.path.dirname(proj_file) if proj_file else ''
-                            except Exception:
-                                proj_dir = ''
-                            if path and proj_dir and not os.path.isabs(path):
-                                path = os.path.join(proj_dir, path)
-                        except Exception:
-                            pass
-
-                        if not path or not os.path.exists(path):
-                            QMessageBox.warning(self, self.tr("File not found"), self.tr("Could not locate the geo_search_json file to edit."))
-                            return
-
-                        # Read file
-                        try:
-                            with open(path, 'r', encoding='utf-8') as fh:
-                                data = json.load(fh)
-                        except Exception as e:
-                            QMessageBox.warning(self, self.tr("Read error"), self.tr("Failed to read the geo_search_json file: {0}").format(str(e)))
-                            return
-
-                        # Determine target list
-                        if isinstance(data, dict) and isinstance(data.get('SearchTabs'), list):
-                            target = data['SearchTabs']
-                            container_is_dict = True
-                        elif isinstance(data, list):
-                            target = data
-                            container_is_dict = False
-                        else:
-                            QMessageBox.warning(self, self.tr("Unsupported format"), self.tr("geo_search_json file has unsupported structure; expected {'SearchTabs': [...]} or an array."))
-                            return
-
-                        # Determine index to remove
-                        remove_idx = None
-                        if isinstance(src_idx, int):
-                            if 0 <= src_idx < len(target):
-                                remove_idx = int(src_idx)
-                            else:
-                                remove_idx = None
-                        if remove_idx is None:
-                            # Fallback: find by Title match
-                            title = resolved_title
-                            for i, it in enumerate(target):
-                                try:
-                                    if isinstance(it, dict) and it.get('Title') == title:
-                                        remove_idx = i
-                                        break
-                                except Exception:
-                                    continue
-
-                        if remove_idx is None:
-                            QMessageBox.information(self, self.tr("Not found"), self.tr("Could not find corresponding entry in geo_search_json to remove."))
-                            return
-
-                        # Backup original file
-                        try:
-                            bak_name = f"{os.path.basename(path)}.{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.bak"
-                            bak_path = os.path.join(os.path.dirname(path), bak_name)
-                            shutil.copy2(path, bak_path)
-                        except Exception:
-                            bak_path = None
-
-                        # Remove and write atomically
-                        try:
-                            del target[remove_idx]
-                            # Prepare output object
-                            out = data if container_is_dict else target
-                            # write to temp then replace
-                            dirn = os.path.dirname(path) or '.'
-                            fd, tmp_path = tempfile.mkstemp(prefix='geo_search_', dir=dirn, text=True)
-                            try:
-                                with os.fdopen(fd, 'w', encoding='utf-8') as tmpfh:
-                                    json.dump(out, tmpfh, ensure_ascii=False, indent=2)
-                                os.replace(tmp_path, path)
-                            finally:
-                                try:
-                                    if os.path.exists(tmp_path):
-                                        os.remove(tmp_path)
-                                except Exception:
-                                    pass
-                        except Exception as e:
-                            QMessageBox.warning(self, self.tr("Write error"), self.tr("Failed to update geo_search_json file: {0}").format(str(e)))
-                            # Attempt to restore backup if created
-                            try:
-                                if bak_path and os.path.exists(bak_path):
-                                    shutil.copy2(bak_path, path)
-                            except Exception:
-                                pass
-                            return
-
-                        try:
-                            from qgis.core import QgsMessageLog
-                            QgsMessageLog.logMessage(f"Removed entry index={remove_idx} from geo_search_json file: {path} (backup={bak_path})", 'GEO-search-plugin', 0)
-                        except Exception:
-                            pass
-
-                        # Reload UI after successful removal
-                        self.reload_ui("after removing tab from geo_search_json")
+                                print(f"Error updating project variable (inline): {e}")
+                        self.reload_ui("after removing tab from project variable")
                         return
-                except Exception:
-                    # On any unexpected error in geo_search_json removal flow, fall back to project-variable deletion
-                    pass
 
-                # Match by Title and group (IDs removed). Remove entries whose Title matches
-                # the resolved title.
-                updated_settings = [item for item in parsed if item.get("Title") != resolved_title]
-                
-                # 変更があったかチェック
-                if len(updated_settings) == len(parsed):
+                # If we removed by index earlier, persist parsed (which was mutated)
+                if removed:
+                    if len(parsed) == 0:
+                        new_value = ""
+                    else:
+                        new_value = json.dumps(parsed, ensure_ascii=False)
                     try:
-                        from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Tab '{resolved_title}' not found in project variables", "GEO-search-plugin", 1)
-                    except Exception:
-                        print(f"Tab '{resolved_title}' not found in project variables")
-                    # プロジェクト変数に該当する設定が見つからなかった場合も続行
-                    
-                # 更新された設定をJSONに変換（空リストの場合は空文字列に）
-                if len(updated_settings) == 0:
-                    new_value = ""
-                else:
-                    new_value = json.dumps(updated_settings, ensure_ascii=False)
-                
-                # プロジェクト変数を更新（統一ヘルパーを使用）
-                try:
-                    ok = self._save_to_project_variable(project, new_value)
-                    if not ok:
+                        ok = self._save_to_project_variable(project, new_value)
+                        if not ok:
+                            try:
+                                from qgis.core import QgsMessageLog
+                                QgsMessageLog.logMessage("set_project_variable returned False when removing tab (by index)", "GEO-search-plugin", 1)
+                            except Exception:
+                                print("set_project_variable returned False when removing tab (by index)")
+                    except Exception as e:
                         try:
                             from qgis.core import QgsMessageLog
-                            QgsMessageLog.logMessage("set_project_variable returned False when removing tab", "GEO-search-plugin", 1)
+                            QgsMessageLog.logMessage(f"Error updating project variable (by index): {e}", "GEO-search-plugin", 1)
                         except Exception:
-                            print("set_project_variable returned False when removing tab")
-                except Exception as e:
-                    try:
-                        from qgis.core import QgsMessageLog
-                        QgsMessageLog.logMessage(f"Error updating project variable: {e}", "GEO-search-plugin", 1)
-                    except Exception:
-                        print(f"Error updating project variable: {e}")
-                    
-                # No tab_id_mapping to clear since ID-based mapping was removed.
-                
-                # 共通のUIリロードメソッドを呼び出し
-                # これにより、プロジェクト変数に基づいてUIが再構築される
-                self.reload_ui("after removing tab from project variable")
-                
+                            print(f"Error updating project variable (by index): {e}")
+                    self.reload_ui("after removing tab from project variable")
+                    return
             except Exception as e:
                 try:
                     from qgis.core import QgsMessageLog
