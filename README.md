@@ -118,9 +118,21 @@ Configured via the `panModeComboBox` in the search dialog.
 - **V2.0.0** — UI and compatibility improvements.
 - **V1.0.0** — Initial implementation of core search features.
 
+## Disclaimer
+This system was created and tested on a personal computer.
+We accept no liability for any damage arising from its use.
+
+<p align="center">
+  <a href="https://giphy.com/explore/free-gif" target="_blank">
+    <img src="https://github.com/yamamoto-ryuzo/QGIS_portable_3x/raw/master/imgs/giphy.gif" width="500" title="avvio QGIS">
+  </a>
+</p>
+
+
 
 ---
 
 For configuration examples and detailed behavior, see `SEARCH.md` and `THEMES.md`.
+
 
 
